@@ -17,7 +17,7 @@ const GOALS = {
 
 // ─── DATABASE ────────────────────────────────────────────────────────────────
 const FOOD_DB = {
-  "🥩 Carne & Pesce": [
+  "Carne e Pesce": [
     { name: "Petto di pollo", kcal: 165, p: 31, c: 0,   f: 3.6 },
     { name: "Coscia di pollo", kcal: 215, p: 26, c: 0,  f: 12  },
     { name: "Bistecca di manzo", kcal: 250, p: 26, c: 0, f: 16 },
@@ -30,7 +30,7 @@ const FOOD_DB = {
     { name: "Mortadella",       kcal: 311, p: 15, c: 1,  f: 28 },
     { name: "Salsiccia",        kcal: 302, p: 13, c: 2,  f: 27 },
   ],
-  "🥚 Uova & Latticini": [
+  "Uova e Latticini": [
     { name: "Uovo intero",        kcal: 78,  p: 6,  c: 0.6,f: 5   },
     { name: "Uova strapazzate (2)",kcal:180, p: 14, c: 1,  f: 13  },
     { name: "Mozzarella (100g)",  kcal: 280, p: 18, c: 2,  f: 22  },
@@ -41,7 +41,7 @@ const FOOD_DB = {
     { name: "Latte intero (200ml)",kcal:130, p: 6.6,c: 9.6,f: 7.4 },
     { name: "Latte scremato (200ml)",kcal:70,p: 6.8,c: 9.8,f: 0.2 },
   ],
-  "🍝 Pasta & Cereali": [
+  "Pasta e Cereali": [
     { name: "Pasta al pomodoro",  kcal: 350, p: 12, c: 65, f: 5   },
     { name: "Pasta in bianco",    kcal: 290, p: 10, c: 58, f: 3   },
     { name: "Pasta al ragù",      kcal: 450, p: 20, c: 58, f: 15  },
@@ -55,7 +55,7 @@ const FOOD_DB = {
     { name: "Orzo (100g cotto)",  kcal: 123, p: 3,  c: 25, f: 0.4 },
     { name: "Polenta (100g)",     kcal: 83,  p: 2,  c: 18, f: 0.5 },
   ],
-  "🥦 Verdure": [
+  "Verdure": [
     { name: "Insalata mista",     kcal: 15,  p: 1,  c: 2,  f: 0.2 },
     { name: "Pomodori (100g)",    kcal: 18,  p: 0.9,c: 3.5,f: 0.2 },
     { name: "Zucchine (100g)",    kcal: 17,  p: 1.2,c: 3.1,f: 0.3 },
@@ -71,7 +71,7 @@ const FOOD_DB = {
     { name: "Patate (100g)",      kcal: 77,  p: 2,  c: 17, f: 0.1 },
     { name: "Patate al forno",    kcal: 150, p: 3,  c: 30, f: 3   },
   ],
-  "🍎 Frutta": [
+  "Frutta": [
     { name: "Mela (media)",       kcal: 72,  p: 0.4,c: 19, f: 0.2 },
     { name: "Banana (media)",     kcal: 105, p: 1.3,c: 27, f: 0.4 },
     { name: "Arancia (media)",    kcal: 62,  p: 1.2,c: 15, f: 0.2 },
@@ -82,7 +82,7 @@ const FOOD_DB = {
     { name: "Anguria (200g)",     kcal: 60,  p: 1.2,c: 15, f: 0.2 },
     { name: "Pesche (media)",     kcal: 39,  p: 0.9,c: 10, f: 0.3 },
   ],
-  "🥫 Sughi & Condimenti": [
+  "Sughi e Condimenti": [
     { name: "Sugo al pomodoro (100g)",     kcal: 45,  p: 1.5,c: 8,  f: 1.2 },
     { name: "Sugo all'arrabbiata (100g)",  kcal: 55,  p: 1.5,c: 8,  f: 2.5 },
     { name: "Ragù di carne (100g)",        kcal: 150, p: 10, c: 6,  f: 10  },
@@ -94,7 +94,7 @@ const FOOD_DB = {
     { name: "Ketchup (20g)",               kcal: 22,  p: 0.3,c: 5,  f: 0.1 },
     { name: "Salsa di soia (15ml)",        kcal: 9,   p: 1.3,c: 0.9,f: 0   },
   ],
-  "❄️ Surgelati": [
+  "Surgelati": [
     { name: "Bastoncini di pesce (2 pz)",  kcal: 160, p: 8,  c: 16, f: 7   },
     { name: "Cotolette di pesce (1 pz)",   kcal: 180, p: 10, c: 14, f: 9   },
     { name: "Sofficini (2 pz)",            kcal: 280, p: 8,  c: 30, f: 14  },
@@ -108,7 +108,7 @@ const FOOD_DB = {
     { name: "Cannelloni surgelati",        kcal: 290, p: 14, c: 28, f: 13  },
     { name: "Wurstel (1 pz)",              kcal: 120, p: 5,  c: 1,  f: 11  },
   ],
-  "🍕 Piatti pronti & Fast food": [
+  "Piatti pronti": [
     { name: "Pizza margherita (1 fetta)",  kcal: 270, p: 11, c: 35, f: 9   },
     { name: "Pizza 4 stagioni (1 fetta)",  kcal: 290, p: 13, c: 33, f: 11  },
     { name: "Trancio di pizza bianca",     kcal: 310, p: 9,  c: 48, f: 9   },
@@ -118,10 +118,414 @@ const FOOD_DB = {
     { name: "Supplì (1 pz)",               kcal: 180, p: 6,  c: 22, f: 8   },
     { name: "Arancino (1 pz)",             kcal: 280, p: 8,  c: 38, f: 10  },
   ],
-  "☕ Colazione & Snack": [
+  "Colazione e Snack": [
     { name: "Caffè espresso",              kcal: 2,   p: 0.1,c: 0.3,f: 0   },
     { name: "Caffè con zucchero",          kcal: 30,  p: 0.3,c: 7,  f: 0   },
-< truncated lines 124-528 >
+    { name: "Cappuccino",                  kcal: 80,  p: 4,  c: 8,  f: 3   },
+    { name: "Brioche vuota",               kcal: 250, p: 5,  c: 38, f: 9   },
+    { name: "Biscotti (3 pz)",             kcal: 150, p: 2,  c: 23, f: 6   },
+    { name: "Fette biscottate (2 pz)",     kcal: 140, p: 3,  c: 28, f: 2   },
+    { name: "Marmellata (20g)",            kcal: 50,  p: 0.2,c: 13, f: 0   },
+    { name: "Nutella (20g)",               kcal: 110, p: 1.4,c: 12, f: 6.5 },
+    { name: "Gelato (1 pallina)",          kcal: 130, p: 2,  c: 18, f: 6   },
+    { name: "Barretta cioccolato (30g)",   kcal: 160, p: 2,  c: 18, f: 9   },
+    { name: "Patatine (30g sacchetto)",    kcal: 163, p: 2,  c: 15, f: 11  },
+    { name: "Frutta secca mista (30g)",    kcal: 180, p: 5,  c: 6,  f: 16  },
+  ],
+  "Bevande": [
+    { name: "Acqua",                       kcal: 0,   p: 0,  c: 0,  f: 0   },
+    { name: "Succo d'arancia (200ml)",     kcal: 90,  p: 1,  c: 22, f: 0   },
+    { name: "Coca Cola (330ml)",           kcal: 139, p: 0,  c: 35, f: 0   },
+    { name: "Birra (330ml)",               kcal: 143, p: 1,  c: 13, f: 0   },
+    { name: "Vino rosso (150ml)",          kcal: 127, p: 0.1,c: 4,  f: 0   },
+    { name: "Smoothie frutta (200ml)",     kcal: 120, p: 1,  c: 28, f: 0.5 },
+  ],
+};
+
+const ALL_FOODS = Object.values(FOOD_DB).flat();
+
+// ─── Fox SVG ──────────────────────────────────────────────────────────────────
+function Fox({ mood, size = 120 }) {
+  const moods = {
+    happy:    { eyeY: 52, mouthD: "M 44 65 Q 50 72 56 65", tail: "#F4845F", blush: true  },
+    excited:  { eyeY: 50, mouthD: "M 42 63 Q 50 74 58 63", tail: "#F9C74F", blush: true  },
+    neutral:  { eyeY: 54, mouthD: "M 44 66 Q 50 68 56 66", tail: "#A78BFA", blush: false },
+    sad:      { eyeY: 56, mouthD: "M 44 70 Q 50 64 56 70", tail: "#9E8FB0", blush: false },
+    sleeping: { eyeY: 55, mouthD: "M 44 66 Q 50 69 56 66", tail: "#6FCF97", blush: false },
+  };
+  const m = moods[mood] || moods.neutral;
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" style={{ filter:"drop-shadow(0 4px 12px rgba(244,132,95,0.3))" }}>
+      <ellipse cx="50" cy="72" rx="22" ry="18" fill="#E8763A"/>
+      <ellipse cx="50" cy="75" rx="13" ry="11" fill="#F5EFE6"/>
+      <path d="M 68 72 Q 88 58 82 42 Q 76 30 68 38 Q 74 50 66 60 Z" fill={m.tail} opacity="0.9"/>
+      <ellipse cx="75" cy="36" rx="6" ry="5" fill="#F5EFE6" transform="rotate(-20 75 36)"/>
+      <ellipse cx="50" cy="46" rx="20" ry="19" fill="#E8763A"/>
+      <polygon points="34,30 30,14 42,26" fill="#E8763A"/>
+      <polygon points="36,29 33,17 41,26" fill="#C0392B" opacity="0.5"/>
+      <polygon points="66,30 70,14 58,26" fill="#E8763A"/>
+      <polygon points="64,29 67,17 59,26" fill="#C0392B" opacity="0.5"/>
+      <ellipse cx="50" cy="52" rx="13" ry="11" fill="#F5EFE6"/>
+      {mood === "sleeping" ? (
+        <>
+          <path d="M 43 54 Q 46 51 49 54" stroke="#1C1228" strokeWidth="2" fill="none" strokeLinecap="round"/>
+          <path d="M 51 54 Q 54 51 57 54" stroke="#1C1228" strokeWidth="2" fill="none" strokeLinecap="round"/>
+          <text x="62" y="38" fontSize="8" fill="#A78BFA" fontWeight="bold">z</text>
+          <text x="67" y="32" fontSize="10" fill="#A78BFA" fontWeight="bold">z</text>
+          <text x="73" y="25" fontSize="12" fill="#A78BFA" fontWeight="bold">z</text>
+        </>
+      ) : (
+        <>
+          <circle cx="45" cy={m.eyeY} r="4" fill="#1C1228"/>
+          <circle cx="55" cy={m.eyeY} r="4" fill="#1C1228"/>
+          <circle cx="46.5" cy={m.eyeY-1.5} r="1.2" fill="white"/>
+          <circle cx="56.5" cy={m.eyeY-1.5} r="1.2" fill="white"/>
+        </>
+      )}
+      <ellipse cx="50" cy="61" rx="2.5" ry="2" fill="#C0392B"/>
+      <path d={m.mouthD} stroke="#1C1228" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
+      {m.blush && (
+        <>
+          <ellipse cx="39" cy="58" rx="5" ry="3" fill="#F4845F" opacity="0.35"/>
+          <ellipse cx="61" cy="58" rx="5" ry="3" fill="#F4845F" opacity="0.35"/>
+        </>
+      )}
+      <ellipse cx="35" cy="84" rx="7" ry="5" fill="#E8763A"/>
+      <ellipse cx="65" cy="84" rx="7" ry="5" fill="#E8763A"/>
+    </svg>
+  );
+}
+
+// ─── Utils ────────────────────────────────────────────────────────────────────
+function todayKey() { return new Date().toISOString().split("T")[0]; }
+function getStreak(log) {
+  let streak = 0;
+  const today = new Date();
+  for (let i = 0; i < 30; i++) {
+    const d = new Date(today); d.setDate(today.getDate() - i);
+    const key = d.toISOString().split("T")[0];
+    if (log[key]?.meals?.length > 0) streak++;
+    else if (i > 0) break;
+  }
+  return streak;
+}
+function getMood(ratio) {
+  if (ratio === 0) return "sleeping";
+  if (ratio < 0.5) return "sad";
+  if (ratio < 0.85) return "neutral";
+  if (ratio <= 1.1) return "happy";
+  return "excited";
+}
+function getFoxMessage(mood, name) {
+  const msgs = {
+    sleeping: [`Ehi ${name}, non ho ancora mangiato oggi! 🦊`, "Inizia a loggare il primo pasto!"],
+    sad:      [`${name}... sei sicuro di aver mangiato abbastanza?`, "Ricordati di mangiare bene oggi 🍽️"],
+    neutral:  ["Stiamo andando bene!", "Continua così, siamo a metà strada 💪"],
+    happy:    ["Ottima giornata! Sono soddisfatta 🦊✨", `${name}, oggi stai andando alla grande!`],
+    excited:  ["WOW! Obiettivo centrato! 🎉", "Perfetto! Hai trovato il tuo equilibrio 🌟"],
+  };
+  const arr = msgs[mood] || msgs.neutral;
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+const inputStyle = {
+  width: "100%", background: "#1C1228", border: "1px solid #3A2850",
+  borderRadius: 10, color: "#F5EFE6", padding: "10px 14px",
+  fontSize: 15, boxSizing: "border-box", outline: "none",
+};
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+export default function NutriFox() {
+  // ── Persistent state helpers ──────────────────────────────────────────────
+  function load(key, fallback) {
+    try { const v = localStorage.getItem(key); return v !== null ? JSON.parse(v) : fallback; } catch { return fallback; }
+  }
+  function save(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  }
+
+  const [screen, setScreen] = useState("home");
+  const [goalKey, setGoalKey] = useState(() => load("nf_goalKey", "mangiare_meglio"));
+  const [foxName, setFoxName] = useState(() => load("nf_foxName", "Foxy"));
+  const [dailyLog, setDailyLog] = useState(() => load("nf_dailyLog", {}));
+  const [customRecipes, setCustomRecipes] = useState(() => load("nf_recipes", []));
+  const [search, setSearch] = useState("");
+  const [activeCategory, setActiveCategory] = useState("Tutti");
+  const [mealType, setMealType] = useState("Pranzo");
+  const [logMode, setLogMode] = useState("db");
+  const [customFood, setCustomFood] = useState({ name:"", kcal:"", p:"", c:"", f:"" });
+  const [foxMsg, setFoxMsg] = useState("");
+  const [setupDone, setSetupDone] = useState(() => load("nf_setupDone", false));
+  const [tempName, setTempName] = useState("Foxy");
+  const [tempGoal, setTempGoal] = useState("mangiare_meglio");
+
+  // ── Auto-save on every change ─────────────────────────────────────────────
+  useEffect(() => { save("nf_goalKey", goalKey); }, [goalKey]);
+  useEffect(() => { save("nf_foxName", foxName); }, [foxName]);
+  useEffect(() => { save("nf_dailyLog", dailyLog); }, [dailyLog]);
+  useEffect(() => { save("nf_recipes", customRecipes); }, [customRecipes]);
+  useEffect(() => { save("nf_setupDone", setupDone); }, [setupDone]);
+
+  // Recipe builder state
+  const [builderName, setBuilderName] = useState("");
+  const [builderIngredients, setBuilderIngredients] = useState([]);
+  const [builderSearch, setBuilderSearch] = useState("");
+  const [builderCategory, setBuilderCategory] = useState("Tutti");
+
+  const today = todayKey();
+  const todayData = dailyLog[today] || { meals: [] };
+  const goal = GOALS[goalKey];
+  const totalKcal = todayData.meals.reduce((s,m) => s+m.kcal, 0);
+  const totalP    = todayData.meals.reduce((s,m) => s+(m.p||0), 0);
+  const totalC    = todayData.meals.reduce((s,m) => s+(m.c||0), 0);
+  const totalF    = todayData.meals.reduce((s,m) => s+(m.f||0), 0);
+  const ratio     = totalKcal / goal.kcal;
+  const mood      = getMood(ratio);
+  const streak    = getStreak(dailyLog);
+  const pct       = Math.min(ratio*100, 100);
+
+  useEffect(() => { setFoxMsg(getFoxMessage(mood, foxName)); }, [mood, foxName]);
+
+  // filtered foods for log screen
+  const categories = ["Tutti", ...Object.keys(FOOD_DB)];
+  const poolLog = activeCategory === "Tutti" ? ALL_FOODS : (FOOD_DB[activeCategory] || []);
+  const filteredLog = poolLog.filter(f => f.name.toLowerCase().includes(search.toLowerCase()));
+
+  // filtered foods for builder
+  const poolBuilder = builderCategory === "Tutti" ? ALL_FOODS : (FOOD_DB[builderCategory] || []);
+  const filteredBuilder = poolBuilder.filter(f => f.name.toLowerCase().includes(builderSearch.toLowerCase()));
+
+  const builderKcal = builderIngredients.reduce((s,i)=>s+i.kcal,0);
+  const builderP    = builderIngredients.reduce((s,i)=>s+(i.p||0),0);
+  const builderC    = builderIngredients.reduce((s,i)=>s+(i.c||0),0);
+  const builderF    = builderIngredients.reduce((s,i)=>s+(i.f||0),0);
+
+  function addFood(food) {
+    const entry = { ...food, meal: mealType, time: new Date().toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"}) };
+    setDailyLog(prev => ({ ...prev, [today]: { meals:[...(prev[today]?.meals||[]), entry] } }));
+    setSearch(""); setScreen("home");
+  }
+  function addCustomFood() {
+    if (!customFood.name || !customFood.kcal) return;
+    addFood({ name:customFood.name, kcal:Number(customFood.kcal), p:Number(customFood.p)||0, c:Number(customFood.c)||0, f:Number(customFood.f)||0 });
+    setCustomFood({ name:"", kcal:"", p:"", c:"", f:"" });
+  }
+  function removeFood(idx) {
+    setDailyLog(prev => { const meals=[...(prev[today]?.meals||[])]; meals.splice(idx,1); return {...prev,[today]:{meals}}; });
+  }
+  function saveRecipe() {
+    if (!builderName || builderIngredients.length === 0) return;
+    const recipe = { name:builderName, kcal:Math.round(builderKcal), p:Math.round(builderP), c:Math.round(builderC), f:Math.round(builderF), ingredients:builderIngredients };
+    setCustomRecipes(prev => [...prev, recipe]);
+    setBuilderName(""); setBuilderIngredients([]); setBuilderSearch(""); setScreen("log");
+  }
+  function addBuilderIngredient(food) {
+    setBuilderIngredients(prev => [...prev, food]);
+    setBuilderSearch("");
+  }
+  function removeBuilderIngredient(idx) {
+    setBuilderIngredients(prev => { const a=[...prev]; a.splice(idx,1); return a; });
+  }
+
+  // ── Setup ──────────────────────────────────────────────────────────────────
+  if (!setupDone) return (
+    <div style={{ minHeight:"100vh", background:COLORS.bg, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Segoe UI',system-ui,sans-serif", padding:24 }}>
+      <div style={{ background:COLORS.card, border:`1px solid ${COLORS.cardBorder}`, borderRadius:24, padding:36, maxWidth:380, width:"100%", textAlign:"center" }}>
+        <Fox mood="excited" size={110}/>
+        <h1 style={{ color:COLORS.text, fontSize:26, margin:"16px 0 6px", fontWeight:700 }}>Ciao! Sono la tua volpe 🦊</h1>
+        <p style={{ color:COLORS.textMuted, fontSize:14, marginBottom:28 }}>Aiutami a conoscerti prima di iniziare</p>
+        <label style={{ display:"block", textAlign:"left", color:COLORS.textMuted, fontSize:13, marginBottom:6 }}>Come mi chiamo?</label>
+        <input value={tempName} onChange={e=>setTempName(e.target.value)} placeholder="Es. Foxy, Aurora..." style={{...inputStyle, marginBottom:20}}/>
+        <label style={{ display:"block", textAlign:"left", color:COLORS.textMuted, fontSize:13, marginBottom:10 }}>Qual è il tuo obiettivo?</label>
+        <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:28 }}>
+          {Object.entries(GOALS).map(([k,g]) => (
+            <button key={k} onClick={()=>setTempGoal(k)} style={{ background:tempGoal===k?COLORS.accentSoft:COLORS.bg, border:`2px solid ${tempGoal===k?COLORS.accent:COLORS.cardBorder}`, borderRadius:12, color:COLORS.text, padding:"12px 16px", fontSize:14, cursor:"pointer", display:"flex", alignItems:"center", gap:10 }}>
+              <span style={{fontSize:20}}>{g.emoji}</span>
+              <div style={{textAlign:"left"}}><div style={{fontWeight:600}}>{g.label}</div><div style={{color:COLORS.textMuted,fontSize:12}}>{g.kcal} kcal/giorno</div></div>
+              {tempGoal===k && <span style={{marginLeft:"auto",color:COLORS.accent}}>✓</span>}
+            </button>
+          ))}
+        </div>
+        <button onClick={()=>{ setFoxName(tempName||"Foxy"); setGoalKey(tempGoal); setSetupDone(true); }} style={{ width:"100%", background:COLORS.accent, border:"none", borderRadius:14, color:"white", padding:14, fontSize:16, fontWeight:700, cursor:"pointer" }}>
+          Inizia con {tempName||"Foxy"} →
+        </button>
+      </div>
+    </div>
+  );
+
+  // ── Recipe Builder ─────────────────────────────────────────────────────────
+  if (screen === "builder") {
+    const bCats = ["Tutti", ...Object.keys(FOOD_DB)];
+    return (
+      <div style={{ minHeight:"100vh", background:COLORS.bg, fontFamily:"'Segoe UI',system-ui,sans-serif", maxWidth:420, margin:"0 auto", padding:"24px 16px 40px" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20 }}>
+          <button onClick={()=>setScreen("log")} style={{ background:COLORS.card, border:`1px solid ${COLORS.cardBorder}`, borderRadius:10, color:COLORS.text, padding:"8px 14px", cursor:"pointer", fontSize:14 }}>← Indietro</button>
+          <h2 style={{ color:COLORS.text, margin:0, fontSize:18, fontWeight:700 }}>🍳 Crea piatto</h2>
+        </div>
+
+        <div style={{ background:COLORS.card, border:`1px solid ${COLORS.cardBorder}`, borderRadius:16, padding:16, marginBottom:14 }}>
+          <label style={{ color:COLORS.textMuted, fontSize:13, display:"block", marginBottom:6 }}>Nome del piatto</label>
+          <input value={builderName} onChange={e=>setBuilderName(e.target.value)} placeholder="Es. Pasta con verdure e tonno..." style={inputStyle}/>
+        </div>
+
+        {/* Ingredients added */}
+        {builderIngredients.length > 0 && (
+          <div style={{ background:COLORS.card, border:`1px solid ${COLORS.cardBorder}`, borderRadius:16, padding:16, marginBottom:14 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:10 }}>
+              <span style={{ color:COLORS.text, fontWeight:700, fontSize:14 }}>Ingredienti aggiunti</span>
+              <span style={{ color:COLORS.accent, fontWeight:700, fontSize:14 }}>{Math.round(builderKcal)} kcal tot.</span>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6, marginBottom:12 }}>
+              {[["P",Math.round(builderP),COLORS.purple],["C",Math.round(builderC),COLORS.gold],["G",Math.round(builderF),COLORS.accent]].map(([l,v,c])=>(
+                <div key={l} style={{ background:COLORS.bg, borderRadius:8, padding:"6px 10px", textAlign:"center" }}>
+                  <div style={{color:c,fontWeight:700,fontSize:14}}>{v}g</div>
+                  <div style={{color:COLORS.textMuted,fontSize:11}}>{l==="P"?"Prot.":l==="C"?"Carb.":"Grassi"}</div>
+                </div>
+              ))}
+            </div>
+            {builderIngredients.map((ing,i) => (
+              <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:COLORS.bg, borderRadius:8, padding:"8px 12px", marginBottom:6 }}>
+                <span style={{ color:COLORS.text, fontSize:13 }}>{ing.name}</span>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ color:COLORS.accent, fontSize:13, fontWeight:600 }}>{ing.kcal} kcal</span>
+                  <button onClick={()=>removeBuilderIngredient(i)} style={{ background:"none", border:"none", color:COLORS.textMuted, cursor:"pointer", fontSize:15 }}>✕</button>
+                </div>
+              </div>
+            ))}
+            <button onClick={saveRecipe} style={{ width:"100%", background:COLORS.green, border:"none", borderRadius:12, color:"#1C1228", padding:12, fontSize:15, fontWeight:700, cursor:"pointer", marginTop:8 }}>
+              💾 Salva piatto
+            </button>
+          </div>
+        )}
+
+        {/* Search ingredients */}
+        <div style={{ background:COLORS.card, border:`1px solid ${COLORS.cardBorder}`, borderRadius:16, padding:16 }}>
+          <p style={{ color:COLORS.textMuted, fontSize:13, margin:"0 0 10px" }}>Aggiungi ingredienti</p>
+          <input value={builderSearch} onChange={e=>setBuilderSearch(e.target.value)} placeholder="Cerca ingrediente..." style={{...inputStyle, marginBottom:10}}/>
+          {/* Category chips */}
+          <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:8, marginBottom:10 }}>
+            {bCats.map(cat => (
+              <button key={cat} onClick={()=>setBuilderCategory(cat)} style={{ background:builderCategory===cat?COLORS.accent:COLORS.bg, border:`1px solid ${builderCategory===cat?COLORS.accent:COLORS.cardBorder}`, borderRadius:20, color:"white", padding:"5px 12px", fontSize:12, cursor:"pointer", whiteSpace:"nowrap", fontWeight:builderCategory===cat?700:400 }}>
+                {cat === "Tutti" ? "Tutti" : cat}
+              </button>
+            ))}
+          </div>
+          <div style={{ maxHeight:280, overflowY:"auto", display:"flex", flexDirection:"column", gap:6 }}>
+            {(builderSearch ? filteredBuilder : poolBuilder).map((f,i) => (
+              <button key={i} onClick={()=>addBuilderIngredient(f)} style={{ background:COLORS.bg, border:`1px solid ${COLORS.cardBorder}`, borderRadius:10, color:COLORS.text, padding:"10px 14px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", textAlign:"left" }}>
+                <div><div style={{fontSize:13,fontWeight:600}}>{f.name}</div><div style={{fontSize:11,color:COLORS.textMuted}}>P {f.p}g · C {f.c}g · G {f.f}g</div></div>
+                <span style={{color:COLORS.accent,fontWeight:700,fontSize:13}}>+{f.kcal}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Log screen ─────────────────────────────────────────────────────────────
+  if (screen === "log") {
+    const cats = ["Tutti", ...Object.keys(FOOD_DB)];
+    return (
+      <div style={{ minHeight:"100vh", background:COLORS.bg, fontFamily:"'Segoe UI',system-ui,sans-serif", maxWidth:420, margin:"0 auto", padding:"24px 16px 40px" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:16 }}>
+          <button onClick={()=>setScreen("home")} style={{ background:COLORS.card, border:`1px solid ${COLORS.cardBorder}`, borderRadius:10, color:COLORS.text, padding:"8px 14px", cursor:"pointer", fontSize:14 }}>← Indietro</button>
+          <h2 style={{ color:COLORS.text, margin:0, fontSize:18, fontWeight:700 }}>Aggiungi pasto</h2>
+        </div>
+
+        {/* Meal type */}
+        <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
+          {["Colazione","Pranzo","Cena","Spuntino"].map(t => (
+            <button key={t} onClick={()=>setMealType(t)} style={{ background:mealType===t?COLORS.accent:COLORS.card, border:`1px solid ${mealType===t?COLORS.accent:COLORS.cardBorder}`, borderRadius:20, color:"white", padding:"7px 14px", fontSize:13, cursor:"pointer", fontWeight:mealType===t?700:400 }}>{t}</button>
+          ))}
+        </div>
+
+        {/* Mode tabs */}
+        <div style={{ display:"flex", background:COLORS.card, borderRadius:12, padding:4, marginBottom:16, border:`1px solid ${COLORS.cardBorder}`, gap:3 }}>
+          {[["db","🍽️ Database"],["recipes","📋 Miei piatti"],["custom","✏️ Manuale"]].map(([k,l]) => (
+            <button key={k} onClick={()=>setLogMode(k)} style={{ flex:1, background:logMode===k?COLORS.accent:"transparent", border:"none", borderRadius:9, color:"white", padding:"8px 4px", fontSize:12, cursor:"pointer", fontWeight:logMode===k?700:400 }}>{l}</button>
+          ))}
+        </div>
+
+        {logMode === "db" && (
+          <>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Cerca alimento..." style={{...inputStyle, marginBottom:10}}/>
+            {/* Category chips */}
+            <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:8, marginBottom:12 }}>
+              {cats.map(cat => (
+                <button key={cat} onClick={()=>setActiveCategory(cat)} style={{ background:activeCategory===cat?COLORS.accent:COLORS.card, border:`1px solid ${activeCategory===cat?COLORS.accent:COLORS.cardBorder}`, borderRadius:20, color:"white", padding:"5px 12px", fontSize:12, cursor:"pointer", whiteSpace:"nowrap", fontWeight:activeCategory===cat?700:400 }}>
+                  {cat === "Tutti" ? "Tutti" : cat}
+                </button>
+              ))}
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8, maxHeight:420, overflowY:"auto" }}>
+              {(search ? filteredLog : poolLog).map((f,i) => (
+                <button key={i} onClick={()=>addFood(f)} style={{ background:COLORS.card, border:`1px solid ${COLORS.cardBorder}`, borderRadius:12, color:COLORS.text, padding:"12px 16px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", textAlign:"left" }}>
+                  <div><div style={{fontSize:14,fontWeight:600}}>{f.name}</div><div style={{fontSize:12,color:COLORS.textMuted}}>P {f.p}g · C {f.c}g · G {f.f}g</div></div>
+                  <span style={{color:COLORS.accent,fontWeight:700,fontSize:15}}>{f.kcal} kcal</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {logMode === "recipes" && (
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            <button onClick={()=>setScreen("builder")} style={{ background:COLORS.accentSoft, border:`2px dashed ${COLORS.accent}`, borderRadius:14, color:COLORS.accent, padding:14, fontSize:14, fontWeight:700, cursor:"pointer" }}>
+              + Crea nuovo piatto
+            </button>
+            {customRecipes.length === 0 ? (
+              <p style={{ color:COLORS.textMuted, textAlign:"center", fontSize:13, marginTop:20 }}>Nessun piatto salvato ancora.<br/>Creane uno con gli ingredienti che preferisci!</p>
+            ) : customRecipes.map((r,i) => (
+              <button key={i} onClick={()=>addFood(r)} style={{ background:COLORS.card, border:`1px solid ${COLORS.cardBorder}`, borderRadius:14, color:COLORS.text, padding:"14px 16px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", textAlign:"left" }}>
+                <div>
+                  <div style={{fontSize:14,fontWeight:700}}>🍳 {r.name}</div>
+                  <div style={{fontSize:12,color:COLORS.textMuted}}>P {r.p}g · C {r.c}g · G {r.f}g · {r.ingredients.length} ingredienti</div>
+                </div>
+                <span style={{color:COLORS.accent,fontWeight:700,fontSize:15}}>{r.kcal} kcal</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {logMode === "custom" && (
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            {[["name","Nome alimento","text"],["kcal","Calorie (kcal)","number"],["p","Proteine (g)","number"],["c","Carboidrati (g)","number"],["f","Grassi (g)","number"]].map(([k,label,type]) => (
+              <div key={k}>
+                <label style={{ color:COLORS.textMuted, fontSize:13, display:"block", marginBottom:4 }}>{label}</label>
+                <input type={type} value={customFood[k]} onChange={e=>setCustomFood(p=>({...p,[k]:e.target.value}))} placeholder={label} style={inputStyle}/>
+              </div>
+            ))}
+            <button onClick={addCustomFood} style={{ background:COLORS.accent, border:"none", borderRadius:12, color:"white", padding:13, fontSize:15, fontWeight:700, cursor:"pointer", marginTop:4 }}>Aggiungi pasto</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── History screen ─────────────────────────────────────────────────────────
+  if (screen === "history") {
+    const days = Object.entries(dailyLog).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,7);
+    return (
+      <div style={{ minHeight:"100vh", background:COLORS.bg, fontFamily:"'Segoe UI',system-ui,sans-serif", maxWidth:420, margin:"0 auto", padding:"24px 16px" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:24 }}>
+          <button onClick={()=>setScreen("home")} style={{ background:COLORS.card, border:`1px solid ${COLORS.cardBorder}`, borderRadius:10, color:COLORS.text, padding:"8px 14px", cursor:"pointer", fontSize:14 }}>← Indietro</button>
+          <h2 style={{ color:COLORS.text, margin:0, fontSize:18, fontWeight:700 }}>Storico 7 giorni</h2>
+        </div>
+        {days.length === 0 ? (
+          <p style={{ color:COLORS.textMuted, textAlign:"center", marginTop:60 }}>Nessun dato ancora. Inizia a loggare!</p>
+        ) : days.map(([date,data]) => {
+          const kcal = data.meals.reduce((s,m)=>s+m.kcal,0);
+          const r = kcal/goal.kcal;
+          const isToday = date===today;
+          return (
+            <div key={date} style={{ background:COLORS.card, border:`1px solid ${COLORS.cardBorder}`, borderRadius:16, padding:"14px 16px", marginBottom:12 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                <span style={{ color:COLORS.text, fontWeight:600, fontSize:14 }}>{isToday ? "Oggi" : new Date(date+"T12:00:00").toLocaleDateString("it-IT",{weekday:"short",day:"numeric",month:"short"})}</span>
+                <span style={{ color:r>=0.85&&r<=1.1?COLORS.green:COLORS.accent, fontWeight:700, fontSize:14 }}>{kcal} / {goal.kcal} kcal</span>
+              </div>
+              <div style={{ height:6, background:COLORS.bg, borderRadius:3, overflow:"hidden" }}>
+                <div style={{ height:"100%", width:`${Math.min(r*100,100)}%`, background:r>=0.85&&r<=1.1?COLORS.green:COLORS.accent, borderRadius:3 }}/>
               </div>
               <div style={{ color:COLORS.textMuted, fontSize:12, marginTop:6 }}>{data.meals.length} pasti loggati</div>
             </div>
