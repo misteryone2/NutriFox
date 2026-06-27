@@ -1,0 +1,18 @@
+{
+  "short_name": "NutriFox",
+  "name": "NutriFox - Tracker Nutrizionale",
+  "description": "Traccia i tuoi pasti con la tua volpe 🦊",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#1C1228",
+  "background_color": "#1C1228",
+  "lang": "it"
+}
