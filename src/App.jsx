@@ -195,7 +195,7 @@ const FOOD_DB = {
 };
 
 const ALL_FOODS = Object.entries(FOOD_DB).flatMap(([cat, items]) =>
-  items.map(f => ({ ...f, category: cat }))
+  items.map(f => ({ ...f, _cat: cat }))
 );
 
 // ── Fox stages by streak ──────────────────────────────────────────────────────
@@ -624,12 +624,12 @@ export default function NutriFox() {
           <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:420,overflowY:"auto"}}>
             {filteredFoods.length===0?<p style={{color:COLORS.textMuted,fontSize:13,textAlign:"center",padding:20}}>Nessun alimento trovato</p>
             :filteredFoods.map((f,i)=>(
-              <div key={i} style={{background:COLORS.card,border:`1px solid ${COLORS.cardBorder}`,borderRadius:12,display:"flex",alignItems:"center",overflow:"hidden"}}>
-                <button onClick={()=>addFood(f)} style={{flex:1,background:"none",border:"none",color:COLORS.text,padding:"12px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
-                  <div><div style={{fontSize:14,fontWeight:600}}>{f.name}</div><div style={{fontSize:11,color:COLORS.textMuted}}>P {f.p}g · C {f.c}g · G {f.f}g</div></div>
-                  <span style={{color:COLORS.accent,fontWeight:700,fontSize:15,marginLeft:8}}>{f.kcal}</span>
+              <div key={i} style={{background:COLORS.bg,border:`1px solid ${COLORS.cardBorder}`,borderRadius:10,display:"flex",alignItems:"center",overflow:"hidden",minHeight:44}}>
+                <button onClick={()=>addFood(f)} style={{flex:1,background:"none",border:"none",color:COLORS.text,padding:"9px 12px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left",minWidth:0}}>
+                  <div style={{flex:1,minWidth:0,paddingRight:8}}><div style={{fontSize:13,fontWeight:600,color:COLORS.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{f.name}</div><div style={{fontSize:10,color:COLORS.textMuted,marginTop:2}}>P {f.p}g · C {f.c}g · G {f.f}g</div></div>
+                  <span style={{color:COLORS.accent,fontWeight:700,fontSize:14,flexShrink:0}}>{f.kcal}</span>
                 </button>
-                <button onClick={()=>toggleFavorite(f.name)} style={{background:"none",border:"none",borderLeft:`1px solid ${COLORS.cardBorder}`,color:favorites.includes(f.name)?COLORS.gold:COLORS.textMuted,fontSize:18,padding:"0 14px",cursor:"pointer",alignSelf:"stretch",display:"flex",alignItems:"center"}}>
+                <button onClick={()=>toggleFavorite(f.name)} style={{background:"none",border:"none",borderLeft:`1px solid ${COLORS.cardBorder}`,color:favorites.includes(f.name)?COLORS.gold:COLORS.textMuted,fontSize:18,padding:"0 12px",cursor:"pointer",alignSelf:"stretch",display:"flex",alignItems:"center",flexShrink:0}}>
                   {favorites.includes(f.name)?"★":"☆"}
                 </button>
               </div>
@@ -827,23 +827,23 @@ export default function NutriFox() {
 
       {/* Meals list */}
       <div style={{background:COLORS.card,border:`1px solid ${COLORS.cardBorder}`,borderRadius:20,padding:16,marginBottom:16}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
           <span style={{color:COLORS.text,fontWeight:700,fontSize:15}}>Pasti di oggi</span>
           <span style={{color:COLORS.textMuted,fontSize:13}}>{todayData.meals.length} loggati</span>
         </div>
         {todayData.meals.length===0?(
-          <p style={{color:COLORS.textMuted,fontSize:13,textAlign:"center",padding:"12px 0",margin:0}}>Nessun pasto ancora. {foxName} aspetta!</p>
+          <p style={{color:COLORS.textMuted,fontSize:13,textAlign:"center",padding:"10px 0",margin:0}}>Nessun pasto ancora. {foxName} aspetta!</p>
         ):(
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:220,overflowY:"auto"}}>
             {todayData.meals.map((m,i)=>(
-              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:COLORS.bg,borderRadius:10,padding:"10px 12px"}}>
-                <div>
-                  <div style={{color:COLORS.text,fontSize:14,fontWeight:500}}>{m.name}</div>
-                  <div style={{color:COLORS.textMuted,fontSize:11}}>{m.meal} · {m.time}</div>
+              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:COLORS.bg,borderRadius:7,padding:"6px 10px"}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{color:COLORS.text,fontSize:12,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.name}</div>
+                  <div style={{color:COLORS.textMuted,fontSize:10}}>{m.meal} · {m.time}</div>
                 </div>
-                <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  <span style={{color:COLORS.accent,fontWeight:700,fontSize:14}}>{m.kcal} kcal</span>
-                  <button onClick={()=>removeFood(i)} style={{background:"none",border:"none",color:COLORS.textMuted,cursor:"pointer",fontSize:16,padding:"0 2px"}}>✕</button>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginLeft:8,flexShrink:0}}>
+                  <span style={{color:COLORS.accent,fontWeight:700,fontSize:12}}>{m.kcal}</span>
+                  <button onClick={()=>removeFood(i)} style={{background:"none",border:"none",color:COLORS.textMuted,cursor:"pointer",fontSize:13,padding:"0 2px",lineHeight:1}}>✕</button>
                 </div>
               </div>
             ))}
