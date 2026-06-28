@@ -405,6 +405,10 @@ export default function NutriFox() {
   const [recentFoods,setRecentFoods]=useState(()=>load("nf_recent",[]));
   const [customRecipes,setCustomRecipes]=useState(()=>load("nf_recipes",[]));
   const [water,     setWater]     = useState(()=>load("nf_water_"+todayKey(),0));
+  const [aiMessages,setAiMessages]= useState(()=>load("nf_aimsg",[]));
+  const [aiInput,   setAiInput]   = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const chatEndRef = useRef(null);
 
   // Fox state
   const [foxState,  setFoxState]  = useState(()=>load("nf_foxstate",{hunger:50,energy:50}));
@@ -435,6 +439,8 @@ export default function NutriFox() {
   useEffect(()=>save("nf_recipes",customRecipes),[customRecipes]);
   useEffect(()=>save("nf_water_"+todayKey(),water),[water]);
   useEffect(()=>save("nf_foxstate",foxState),[foxState]);
+  useEffect(()=>save("nf_aimsg",aiMessages.slice(-40)),[aiMessages]);
+  useEffect(()=>{ chatEndRef.current?.scrollIntoView({behavior:"smooth"}); },[aiMessages]);
 
   // Hunger grows over time
   useEffect(()=>{
@@ -489,6 +495,52 @@ export default function NutriFox() {
   const bC=builderIngredients.reduce((s,i)=>s+(i.c||0),0);
   const bF=builderIngredients.reduce((s,i)=>s+(i.f||0),0);
 
+  async function askFox(userMsg) {
+    if(!userMsg.trim()||aiLoading) return;
+    const userEntry = {role:"user", content:userMsg};
+    setAiMessages(prev=>[...prev, userEntry]);
+    setAiInput("");
+    setAiLoading(true);
+
+    const meals = todayData.meals.map(m=>`${m.name} (${m.kcal} kcal, P:${m.p}g C:${m.c}g G:${m.f}g)`).join(", ");
+    const profile_str = profile.weight ? `Peso: ${profile.weight}kg, Altezza: ${profile.height}cm, Eta: ${profile.age}anni, Sesso: ${profile.sex}, Attivita: ${profile.activity}` : "Profilo non inserito";
+    const systemPrompt = `Sei ${foxName}, una volpe simpatica e affettuosa che aiuta l'utente a mangiare meglio. Parli in italiano, in prima persona, con calore e un pizzico di umorismo da volpe. Sei concisa (max 3 frasi). Non sei un medico.
+
+Dati oggi:
+- Pasti: ${meals||"nessuno ancora"}
+- Calorie: ${totalKcal}/${gKcal} kcal
+- Proteine: ${Math.round(totalP)}g, Carboidrati: ${Math.round(totalC)}g, Grassi: ${Math.round(totalF)}g
+- Acqua: ${water}/${targetWater} bicchieri
+- Streak: ${streak} giorni
+- Tuo stato: Fame ${Math.round(foxState.hunger)}%, Energia ${Math.round(foxState.energy)}%
+- Profilo: ${profile_str}
+- Obiettivo: ${GOALS[goalKey].label}
+
+Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai mangiato molto, incoraggialo. Se hai esagerato, dillo con gentilezza.`;
+
+    try {
+      const history = aiMessages.slice(-10).map(m=>({role:m.role,content:m.content}));
+      const res = await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-6",
+          max_tokens:300,
+          system:systemPrompt,
+          messages:[...history,{role:"user",content:userMsg}]
+        })
+      });
+      const data = await res.json();
+      const reply = data.content?.[0]?.text || "Uhm... non riesco a rispondere ora!";
+      setAiMessages(prev=>[...prev,{role:"assistant",content:reply}]);
+      // Fox reacts to AI interaction
+      setBounce(true); setTimeout(()=>setBounce(false),600);
+    } catch(err) {
+      setAiMessages(prev=>[...prev,{role:"assistant",content:"Ops, ho avuto un problema! Riprova tra poco."}]);
+    }
+    setAiLoading(false);
+  }
+
   function triggerBounce(label){
     setBounce(true); setFeedLabel(label);
     setTimeout(()=>setBounce(false),600);
@@ -525,6 +577,93 @@ export default function NutriFox() {
   }
 
   const inp={width:"100%",background:"#0F0A1A",border:"1px solid #2D1F45",borderRadius:10,color:C.text,padding:"10px 14px",fontSize:15,boxSizing:"border-box",outline:"none"};
+
+  // ── AI COACH SCREEN ─────────────────────────────────────────────────────────
+  if(screen==="coach") return(
+    <div style={{minHeight:"100vh",background:C.bg,fontFamily:"system-ui,sans-serif",maxWidth:420,margin:"0 auto",display:"flex",flexDirection:"column"}}>
+      {/* Header */}
+      <div style={{padding:"20px 16px 12px",background:C.card,borderBottom:`1px solid ${C.cardBorder}`}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <button onClick={()=>setScreen("home")} style={{background:"#0F0A1A",border:`1px solid ${C.cardBorder}`,borderRadius:10,color:C.text,padding:"7px 13px",cursor:"pointer",fontSize:14}}>← Indietro</button>
+          <div>
+            <div style={{color:C.text,fontWeight:800,fontSize:16}}>Parla con {foxName}</div>
+            <div style={{color:C.muted,fontSize:11}}>La tua volpe coach nutrizionale</div>
+          </div>
+          <div style={{marginLeft:"auto"}}>
+            <Fox mood={mood} streak={streak} size={44} bounce={bounce}/>
+          </div>
+        </div>
+        {/* Today summary pill */}
+        <div style={{display:"flex",gap:8,marginTop:12,overflowX:"auto",paddingBottom:4}}>
+          {[["🍽️",totalKcal+"/"+ gKcal+" kcal"],["💪",Math.round(totalP)+"g P"],["🔥",streak+" gg"]].map(([ic,val])=>(
+            <div key={val} style={{background:"#0F0A1A",border:`1px solid ${C.cardBorder}`,borderRadius:20,padding:"4px 12px",fontSize:11,color:C.muted,whiteSpace:"nowrap",flexShrink:0}}>{ic} {val}</div>
+          ))}
+        </div>
+      </div>
+
+      {/* Chat */}
+      <div style={{flex:1,overflowY:"auto",padding:"16px",display:"flex",flexDirection:"column",gap:10}}>
+        {aiMessages.length===0&&(
+          <div style={{textAlign:"center",padding:"30px 20px"}}>
+            <Fox mood="happy" streak={streak} size={100}/>
+            <p style={{color:C.muted,fontSize:14,marginTop:12}}>Ciao! Sono {foxName}, la tua coach nutrizionale.</p>
+            <p style={{color:C.muted,fontSize:13}}>Chiedimi dei tuoi pasti, cosa mangiare, consigli sull'energia... sono qui!</p>
+            {/* Suggested questions */}
+            <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:16}}>
+              {["Come sto mangiando oggi?","Ho bisogno di piu proteine?","Cosa mi manca per stasera?","Come mai mi sento senza energia?"].map(q=>(
+                <button key={q} onClick={()=>askFox(q)} style={{background:"#0F0A1A",border:`1px solid ${C.cardBorder}`,borderRadius:20,color:C.text,padding:"10px 16px",fontSize:13,cursor:"pointer",textAlign:"left"}}>
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {aiMessages.map((msg,i)=>(
+          <div key={i} style={{display:"flex",flexDirection:msg.role==="user"?"row-reverse":"row",gap:8,alignItems:"flex-end"}}>
+            {msg.role==="assistant"&&(
+              <div style={{width:28,height:28,borderRadius:"50%",background:C.card,border:`1px solid ${C.cardBorder}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>🦊</div>
+            )}
+            <div style={{maxWidth:"80%",background:msg.role==="user"?`linear-gradient(135deg,${C.accent},#E8553F)`:C.card,border:msg.role==="user"?"none":`1px solid ${C.cardBorder}`,borderRadius:msg.role==="user"?"18px 18px 4px 18px":"18px 18px 18px 4px",padding:"10px 14px",color:C.text,fontSize:13,lineHeight:1.5}}>
+              {msg.content}
+            </div>
+          </div>
+        ))}
+        {aiLoading&&(
+          <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
+            <div style={{width:28,height:28,borderRadius:"50%",background:C.card,border:`1px solid ${C.cardBorder}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>🦊</div>
+            <div style={{background:C.card,border:`1px solid ${C.cardBorder}`,borderRadius:"18px 18px 18px 4px",padding:"10px 16px"}}>
+              <div style={{display:"flex",gap:4}}>
+                {[0,1,2].map(i=>(
+                  <div key={i} style={{width:6,height:6,borderRadius:"50%",background:C.muted,animation:`dotBounce 1s ${i*0.2}s infinite`}}/>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+        <div ref={chatEndRef}/>
+      </div>
+
+      {/* Input */}
+      <div style={{padding:"12px 16px 32px",background:C.card,borderTop:`1px solid ${C.cardBorder}`}}>
+        <div style={{display:"flex",gap:8}}>
+          <input
+            value={aiInput}
+            onChange={e=>setAiInput(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&askFox(aiInput)}
+            placeholder={"Chiedi qualcosa a "+foxName+"..."}
+            style={{flex:1,background:"#0F0A1A",border:`1px solid ${C.cardBorder}`,borderRadius:12,color:C.text,padding:"11px 14px",fontSize:14,outline:"none"}}
+          />
+          <button onClick={()=>askFox(aiInput)} disabled={aiLoading||!aiInput.trim()}
+            style={{background:aiLoading||!aiInput.trim()?"#2D1F45":`linear-gradient(135deg,${C.accent},#E8553F)`,border:"none",borderRadius:12,color:"white",padding:"11px 16px",fontSize:16,cursor:aiLoading?"not-allowed":"pointer",flexShrink:0,transition:"all 0.2s"}}>
+            {aiLoading?"...":"➤"}
+          </button>
+        </div>
+        <div style={{color:C.muted,fontSize:10,textAlign:"center",marginTop:6}}>Powered by Claude · I dati rimangono sul tuo dispositivo</div>
+      </div>
+
+      <style>{`@keyframes dotBounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}`}</style>
+    </div>
+  );
 
   // ── SETUP ────────────────────────────────────────────────────────────────────
   if(!setupDone) return (
@@ -809,7 +948,10 @@ export default function NutriFox() {
         </div>
 
         <div style={{color:C.text,fontWeight:700,fontSize:16,marginTop:4}}>{foxName}</div>
-        <div style={{color:stage.color,fontSize:12,fontWeight:600,marginBottom:14}}>{moodLabels[mood]||"Tranquilla"}</div>
+        <div style={{color:stage.color,fontSize:12,fontWeight:600,marginBottom:10}}>{moodLabels[mood]||"Tranquilla"}</div>
+        <button onClick={()=>setScreen("coach")} style={{background:`linear-gradient(135deg,${C.purple}33,${C.purple}11)`,border:`1px solid ${C.purple}55`,borderRadius:20,color:C.purple,padding:"6px 18px",fontSize:12,fontWeight:700,cursor:"pointer",marginBottom:14,transition:"all 0.2s"}}>
+          Parla con {foxName} ✨
+        </button>
 
         {/* Fox stats */}
         <div style={{display:"flex",gap:12,marginBottom:14}}>
@@ -908,6 +1050,9 @@ export default function NutriFox() {
         <button onClick={()=>setScreen("log")} style={{background:`linear-gradient(135deg,${C.accent},#E8553F)`,border:"none",borderRadius:"50%",width:54,height:54,color:"white",fontSize:28,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 4px 20px ${C.accent}66`}}>+</button>
         <button onClick={()=>setScreen("history")} style={{background:"none",border:"none",color:screen==="history"?C.accent:C.muted,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,fontSize:10}}>
           <span style={{fontSize:20}}>📅</span>Storico
+        </button>
+        <button onClick={()=>setScreen("coach")} style={{background:"none",border:"none",color:screen==="coach"?C.purple:C.muted,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,fontSize:10}}>
+          <span style={{fontSize:20}}>🦊</span>Coach
         </button>
       </div>
     </div>
