@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import Fox, { getFoxStage } from "./Fox";
 
 // ─── PALETTE ──────────────────────────────────────────────────────────────────
 const C = {
@@ -115,7 +116,7 @@ function load(k,fb){ try{ const v=localStorage.getItem(k); return v!==null?JSON.
 function save(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch{} }
 function todayKey(){ return new Date().toISOString().split("T")[0]; }
 
-// ─── FOX STATE LOGIC ──────────────────────────────────────────────────────────
+// ─── FOX STATE LOGIC ─────────────────────────────────────────────────────────
 function computeFoxMood(hunger, energy) {
   if (hunger > 75) return "sad";
   if (hunger < 25 && energy > 60) return "excited";
@@ -132,13 +133,6 @@ function getFoodEffect(food) {
     case "light":   return { hungerDelta:-15, energyDelta:+8,  label:"Leggero e fresco!"};
     default:        return { hungerDelta:-20, energyDelta:+15, label:"Buono!"           };
   }
-}
-
-function getFoxStage(streak) {
-  if (streak >= 30) return { name:"Leggendaria", color:C.gold,   aura:true  };
-  if (streak >= 14) return { name:"Adulta",      color:C.purple, aura:false };
-  if (streak >= 7)  return { name:"Giovane",     color:C.green,  aura:false };
-  return                   { name:"Cucciolo",    color:C.accent, aura:false };
 }
 
 function getStreak(log) {
@@ -165,218 +159,6 @@ const GOALS={
   mangiare_meglio: {label:"Mangiare meglio",emoji:"🥗", mult:1.0},
   tener_traccia:   {label:"Tener traccia",  emoji:"📋", mult:1.1},
 };
-
-// ─── FOX SVG ──────────────────────────────────────────────────────────────────
-function Fox({ mood, streak=0, size=160, bounce=false }) {
-  const stage = getFoxStage(streak);
-  const sweater  = streak>=30?"#C9A84C":streak>=14?"#7C3AED":streak>=7?"#16A34A":"#D4C5A9";
-  const sweaterD = streak>=30?"#A07830":streak>=14?"#5B21B6":streak>=7?"#166534":"#B5A48A";
-  const pants    = streak>=30?"#92400E":streak>=14?"#4C1D95":streak>=7?"#14532D":"#6B5744";
-
-  const eyes = {
-    happy:    {open:true,  browY:-1, mouthD:"M 44 62 Q 50 68 56 62", blush:true },
-    excited:  {open:true,  browY:-4, mouthD:"M 42 60 Q 50 70 58 60", blush:true },
-    neutral:  {open:true,  browY:0,  mouthD:"M 44 63 Q 50 66 56 63", blush:false},
-    sad:      {open:true,  browY:3,  mouthD:"M 44 67 Q 50 62 56 67", blush:false},
-    sleeping: {open:false, browY:0,  mouthD:"M 44 63 Q 50 66 56 63", blush:false},
-  };
-  const e = eyes[mood] || eyes.neutral;
-
-  const animStyle = bounce
-    ? { animation:"foxBounce 0.5s ease", display:"block" }
-    : mood==="sleeping"
-      ? { animation:"foxBreathe 4s ease-in-out infinite", display:"block" }
-      : mood==="sad"
-        ? { animation:"foxSad 3s ease-in-out infinite", display:"block" }
-        : { animation:"foxIdle 3s ease-in-out infinite", display:"block" };
-
-  return (
-    <div style={{position:"relative",display:"inline-block"}}>
-      {stage.aura&&(
-        <div style={{position:"absolute",inset:-16,borderRadius:"50%",background:`radial-gradient(circle,${C.gold}44 0%,transparent 68%)`,animation:"pulse 2s infinite"}}/>
-      )}
-      {(mood==="happy"||mood==="excited")&&(
-        <>
-          <div style={{position:"absolute",top:10,left:-10,fontSize:16,animation:"floatUp 1s ease-out forwards",opacity:0}}>✨</div>
-          <div style={{position:"absolute",top:0,right:-5,fontSize:14,animation:"floatUp 1.2s ease-out 0.2s forwards",opacity:0}}>⭐</div>
-        </>
-      )}
-      <svg width={size} height={size*1.2} viewBox="0 0 120 150"
-        style={{filter:`drop-shadow(0 8px 24px ${stage.color}77)`,...animStyle}}>
-
-        {/* TAIL */}
-        <path d="M 78 118 Q 110 98 105 68 Q 100 46 84 56 Q 96 70 88 94 Q 83 108 77 114 Z" fill="#D4651A"/>
-        <path d="M 80 116 Q 106 100 102 74 Q 98 55 86 63 Q 95 75 88 96 Q 84 108 79 112 Z" fill="#E8763A"/>
-        <ellipse cx="98" cy="54" rx="10" ry="8" fill="#F5EFE6" transform="rotate(-30 98 54)"/>
-        <ellipse cx="96" cy="52" rx="5" ry="4" fill="white" opacity="0.5" transform="rotate(-30 96 52)"/>
-
-        {/* LEGS */}
-        <rect x="40" y="122" width="15" height="24" rx="7" fill={pants}/>
-        <rect x="65" y="122" width="15" height="24" rx="7" fill={pants}/>
-        <ellipse cx="47" cy="147" rx="10" ry="5.5" fill="#3D2010"/>
-        <ellipse cx="72" cy="147" rx="10" ry="5.5" fill="#3D2010"/>
-        <ellipse cx="42" cy="146" rx="3.5" ry="3" fill="#4D2918"/>
-        <ellipse cx="47" cy="148" rx="3.5" ry="3" fill="#4D2918"/>
-        <ellipse cx="52" cy="146" rx="3.5" ry="3" fill="#4D2918"/>
-        <ellipse cx="67" cy="146" rx="3.5" ry="3" fill="#4D2918"/>
-        <ellipse cx="72" cy="148" rx="3.5" ry="3" fill="#4D2918"/>
-        <ellipse cx="77" cy="146" rx="3.5" ry="3" fill="#4D2918"/>
-
-        {/* BODY */}
-        <rect x="28" y="86" width="64" height="42" rx="18" fill={sweater}/>
-        {/* knit texture */}
-        <path d="M 34 94 Q 38 90 42 94 Q 46 98 50 94 Q 54 90 58 94 Q 62 98 66 94 Q 70 90 74 94 Q 78 98 82 94 Q 86 90 88 94" stroke={sweaterD} strokeWidth="1.3" fill="none" opacity="0.45"/>
-        <path d="M 34 102 Q 38 98 42 102 Q 46 106 50 102 Q 54 98 58 102 Q 62 106 66 102 Q 70 98 74 102 Q 78 106 82 102 Q 86 98 88 102" stroke={sweaterD} strokeWidth="1.3" fill="none" opacity="0.45"/>
-        <path d="M 34 110 Q 38 106 42 110 Q 46 114 50 110 Q 54 106 58 110 Q 62 114 66 110 Q 70 106 74 110 Q 78 114 82 110 Q 86 106 88 110" stroke={sweaterD} strokeWidth="1.3" fill="none" opacity="0.45"/>
-        {/* turtleneck */}
-        <rect x="38" y="78" width="44" height="18" rx="9" fill={sweater}/>
-        <rect x="40" y="79" width="40" height="13" rx="8" fill={sweaterD} opacity="0.35"/>
-        {/* belly */}
-        <ellipse cx="60" cy="112" rx="16" ry="11" fill="#F5EFE6" opacity="0.3"/>
-
-        {/* ARMS */}
-        <path d="M 28 94 Q 10 102 12 122 Q 14 132 24 128 Q 20 116 26 106 Z" fill={sweater}/>
-        <ellipse cx="14" cy="128" rx="9" ry="7" fill="#3D2010"/>
-        <ellipse cx="9" cy="126" rx="3.5" ry="3" fill="#4D2918"/>
-        <ellipse cx="14" cy="130" rx="3.5" ry="3" fill="#4D2918"/>
-        <ellipse cx="19" cy="127" rx="3.5" ry="3" fill="#4D2918"/>
-        <path d="M 92 94 Q 110 102 108 122 Q 106 132 96 128 Q 100 116 94 106 Z" fill={sweater}/>
-        <ellipse cx="106" cy="128" rx="9" ry="7" fill="#3D2010"/>
-        <ellipse cx="101" cy="127" rx="3.5" ry="3" fill="#4D2918"/>
-        <ellipse cx="106" cy="130" rx="3.5" ry="3" fill="#4D2918"/>
-        <ellipse cx="111" cy="126" rx="3.5" ry="3" fill="#4D2918"/>
-
-        {/* HEAD */}
-        <ellipse cx="60" cy="50" rx="30" ry="28" fill="#E8763A"/>
-        <ellipse cx="35" cy="57" rx="11" ry="9" fill="#D4651A" opacity="0.4"/>
-        <ellipse cx="85" cy="57" rx="11" ry="9" fill="#D4651A" opacity="0.4"/>
-
-        {/* EARS */}
-        <polygon points="36,28 26,2 52,20" fill="#E8763A"/>
-        <polygon points="38,27 30,6 50,20" fill="#C0392B" opacity="0.4"/>
-        <polygon points="38,26 32,8 48,21" fill="#F5A07A" opacity="0.65"/>
-        <polygon points="84,28 94,2 68,20" fill="#E8763A"/>
-        <polygon points="82,27 90,6 70,20" fill="#C0392B" opacity="0.4"/>
-        <polygon points="82,26 88,8 72,21" fill="#F5A07A" opacity="0.65"/>
-
-        {/* MUZZLE */}
-        <ellipse cx="60" cy="62" rx="20" ry="15" fill="#F5EFE6"/>
-        <ellipse cx="60" cy="60" rx="18" ry="12" fill="#F0E8DC"/>
-
-        {/* EYES */}
-        {e.open?(
-          <>
-            <ellipse cx="46" cy={46+e.browY} rx="8" ry="8.5" fill="white"/>
-            <ellipse cx="74" cy={46+e.browY} rx="8" ry="8.5" fill="white"/>
-            <circle cx="46" cy={47+e.browY} r="6" fill="#7B3F00"/>
-            <circle cx="74" cy={47+e.browY} r="6" fill="#7B3F00"/>
-            <circle cx="46" cy={47+e.browY} r="4" fill="#1C0A00"/>
-            <circle cx="74" cy={47+e.browY} r="4" fill="#1C0A00"/>
-            <circle cx="48" cy={44+e.browY} r="1.8" fill="white"/>
-            <circle cx="76" cy={44+e.browY} r="1.8" fill="white"/>
-            <circle cx="44" cy={50+e.browY} r="0.9" fill="white" opacity="0.5"/>
-            <circle cx="72" cy={50+e.browY} r="0.9" fill="white" opacity="0.5"/>
-            {mood==="sad"?(
-              <>
-                <path d={"M 40 "+(38+e.browY)+" Q 46 "+(42+e.browY)+" 52 "+(38+e.browY)} stroke="#7B3F00" strokeWidth="2.2" fill="none" strokeLinecap="round"/>
-                <path d={"M 68 "+(38+e.browY)+" Q 74 "+(42+e.browY)+" 80 "+(38+e.browY)} stroke="#7B3F00" strokeWidth="2.2" fill="none" strokeLinecap="round"/>
-              </>
-            ):(
-              <>
-                <path d={"M 40 "+(37+e.browY)+" Q 46 "+(33+e.browY)+" 52 "+(37+e.browY)} stroke="#7B3F00" strokeWidth="2.2" fill="none" strokeLinecap="round"/>
-                <path d={"M 68 "+(37+e.browY)+" Q 74 "+(33+e.browY)+" 80 "+(37+e.browY)} stroke="#7B3F00" strokeWidth="2.2" fill="none" strokeLinecap="round"/>
-              </>
-            )}
-            {mood==="excited"&&(
-              <>
-                <path d={"M 38 "+(31+e.browY)+" Q 46 "+(26+e.browY)+" 54 "+(31+e.browY)} stroke={C.gold} strokeWidth="2.5" fill="none" strokeLinecap="round"/>
-                <path d={"M 66 "+(31+e.browY)+" Q 74 "+(26+e.browY)+" 82 "+(31+e.browY)} stroke={C.gold} strokeWidth="2.5" fill="none" strokeLinecap="round"/>
-              </>
-            )}
-          </>
-        ):(
-          <>
-            <path d="M 39 46 Q 46 41 53 46" stroke="#7B3F00" strokeWidth="2.8" fill="none" strokeLinecap="round"/>
-            <path d="M 67 46 Q 74 41 81 46" stroke="#7B3F00" strokeWidth="2.8" fill="none" strokeLinecap="round"/>
-            <path d="M 41 45 L 39 41" stroke="#7B3F00" strokeWidth="1.8" strokeLinecap="round"/>
-            <path d="M 46 43 L 46 39" stroke="#7B3F00" strokeWidth="1.8" strokeLinecap="round"/>
-            <path d="M 51 44 L 53 41" stroke="#7B3F00" strokeWidth="1.8" strokeLinecap="round"/>
-            <path d="M 69 45 L 67 41" stroke="#7B3F00" strokeWidth="1.8" strokeLinecap="round"/>
-            <path d="M 74 43 L 74 39" stroke="#7B3F00" strokeWidth="1.8" strokeLinecap="round"/>
-            <path d="M 79 44 L 81 41" stroke="#7B3F00" strokeWidth="1.8" strokeLinecap="round"/>
-            <text x="86" y="34" fontSize="9" fill={C.purple} fontWeight="bold">z</text>
-            <text x="92" y="25" fontSize="11" fill={C.purple} fontWeight="bold">z</text>
-          </>
-        )}
-
-        {/* NOSE */}
-        <ellipse cx="60" cy="57" rx="4.5" ry="3.2" fill="#1C0A00"/>
-        <ellipse cx="59" cy="56" rx="2" ry="1.2" fill="white" opacity="0.35"/>
-        {/* MOUTH */}
-        <path d={e.mouthD} stroke="#5C3A1E" strokeWidth="2.2" fill="none" strokeLinecap="round"/>
-        <path d="M 60 57 L 60 62" stroke="#C8A882" strokeWidth="1.4" strokeLinecap="round"/>
-
-        {/* BLUSH */}
-        {e.blush&&(
-          <>
-            <ellipse cx="36" cy="62" rx="9" ry="5.5" fill="#F4845F" opacity="0.22"/>
-            <ellipse cx="84" cy="62" rx="9" ry="5.5" fill="#F4845F" opacity="0.22"/>
-          </>
-        )}
-
-        {/* WHISKERS */}
-        <path d="M 40 63 L 18 58" stroke="#C8A882" strokeWidth="0.9" opacity="0.6"/>
-        <path d="M 40 66 L 18 66" stroke="#C8A882" strokeWidth="0.9" opacity="0.6"/>
-        <path d="M 40 68 L 20 73" stroke="#C8A882" strokeWidth="0.9" opacity="0.6"/>
-        <path d="M 80 63 L 102 58" stroke="#C8A882" strokeWidth="0.9" opacity="0.6"/>
-        <path d="M 80 66 L 102 66" stroke="#C8A882" strokeWidth="0.9" opacity="0.6"/>
-        <path d="M 80 68 L 100 73" stroke="#C8A882" strokeWidth="0.9" opacity="0.6"/>
-
-        {streak>=30&&<text x="60" y="106" textAnchor="middle" fontSize="11" fill={C.gold} fontWeight="bold">★</text>}
-      </svg>
-
-      <style>{`
-        @keyframes foxIdle {
-          0%,100%{transform:translateY(0) rotate(0deg)}
-          50%{transform:translateY(-4px) rotate(0.5deg)}
-        }
-        @keyframes foxBounce {
-          0%{transform:scale(1) translateY(0)}
-          25%{transform:scale(1.08) translateY(-10px)}
-          50%{transform:scale(0.96) translateY(4px)}
-          75%{transform:scale(1.04) translateY(-5px)}
-          100%{transform:scale(1) translateY(0)}
-        }
-        @keyframes foxBreathe {
-          0%,100%{transform:scale(1) translateY(0)}
-          50%{transform:scale(1.02) translateY(-2px)}
-        }
-        @keyframes foxSad {
-          0%,100%{transform:translateY(0)}
-          50%{transform:translateY(3px)}
-        }
-        @keyframes pulse {
-          0%,100%{opacity:0.5} 50%{opacity:1}
-        }
-        @keyframes floatUp {
-          0%{transform:translateY(0);opacity:1}
-          100%{transform:translateY(-40px);opacity:0}
-        }
-        @keyframes slideUp {
-          0%{transform:translateY(20px);opacity:0}
-          100%{transform:translateY(0);opacity:1}
-        }
-        @keyframes fadeIn {
-          0%{opacity:0} 100%{opacity:1}
-        }
-        * { -webkit-tap-highlight-color: transparent; }
-        ::-webkit-scrollbar{width:3px;height:3px}
-        ::-webkit-scrollbar-track{background:#0F0A1A}
-        ::-webkit-scrollbar-thumb{background:#2D1F45;border-radius:2px}
-      `}</style>
-    </div>
-  );
-}
 
 // ─── HUNGER/ENERGY BAR ────────────────────────────────────────────────────────
 function StatBar({ label, value, color, icon }) {
