@@ -2,7 +2,7 @@ import { useFoxAnimations } from "./FoxAnimations";
 import FoxSVG from "./FoxSVG";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Fox.jsx — componente principale: calcola stato visivo (mood, stadio, colori)
+// Fox.jsx — componente principale: calcola stato visivo (mood, stadio, pose, colori)
 // e lo passa al disegno puro (FoxSVG) e alle animazioni idle (FoxAnimations).
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -11,6 +11,15 @@ export function getFoxStage(streak) {
   if (streak >= 14) return { name:"Adulta",      color:"#A78BFA", aura:false, scale:1.06, legs:"normal"};
   if (streak >= 7)  return { name:"Giovane",     color:"#6FCF97", aura:false, scale:1.02, legs:"normal"};
   return                   { name:"Cucciolo",    color:"#F4845F", aura:false, scale:1.0,  legs:"short" };
+}
+
+// Pose in base a quante ore sono passate dall'ultimo pasto. Pure function, nessun timer.
+export function getFoxPose(hoursSinceLastFed) {
+  if (hoursSinceLastFed == null) return "awake";
+  if (hoursSinceLastFed >= 6) return "asleep";
+  if (hoursSinceLastFed >= 4) return "lying";
+  if (hoursSinceLastFed >= 2) return "sitting";
+  return "awake";
 }
 
 // Espressioni per mood — ogni proprietà guida una parte del disegno in FoxSVG
@@ -48,12 +57,15 @@ const EAR_ANGLES = {
   down:     { left:14, right:-14},
 };
 
-export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false }) {
+export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFedAt = null }) {
   const stage = getFoxStage(streak);
   const ex    = MOOD_EXPR[mood] || MOOD_EXPR.neutral;
   const ears  = EAR_ANGLES[ex.earMood] || EAR_ANGLES.up;
 
-  const { blink, lookOffset, headTilt, tailFlick } = useFoxAnimations(mood);
+  const hoursSinceLastFed = lastFedAt ? (Date.now() - lastFedAt) / 3600000 : null;
+  const pose = mood === "sleeping" ? "asleep" : getFoxPose(hoursSinceLastFed);
+
+  const { blink, lookOffset, headTilt, tailFlick, earTwitch, hop } = useFoxAnimations(mood);
 
   // Colori outfit per stadio
   const sw = streak>=30?"#D4A830":streak>=14?"#7C3AED":streak>=7?"#16A34A":"#C8B49A";
@@ -61,12 +73,22 @@ export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce =
   const pt = streak>=30?"#7C3A0A":streak>=14?"#3B0764":streak>=7?"#052E16":"#4A3020";
 
   const bodyAnim = bounce            ? "fox-bounce"
+    : hop                            ? "fox-hop"
+    : pose === "asleep"              ? "fox-breathe"
     : mood === "sleeping"            ? "fox-breathe"
     : mood === "sad"                 ? "fox-sad"
     : mood === "excited"             ? "fox-excited"
     : "fox-idle";
 
   const tailAnimSpeed = mood === "excited" ? "1.8s" : mood === "sad" ? "5s" : tailFlick ? "0.5s" : "3.5s";
+
+  // Pose del corpo: sveglio = scala piena, seduta/sdraiata/dorme = leggera compressione verticale.
+  // Cambio graduale tramite transition CSS, nessun salto brusco.
+  const poseScaleY = pose === "asleep" ? 0.78 : pose === "lying" ? 0.85 : pose === "sitting" ? 0.92 : 1;
+  const poseOffsetY = pose === "asleep" ? 10 : pose === "lying" ? 7 : pose === "sitting" ? 4 : 0;
+  const earAnglePose = pose !== "awake"
+    ? { left: ears.left + 10, right: ears.right - 10 }
+    : (earTwitch ? { left: ears.left + 8, right: ears.right } : ears);
 
   return (
     <div style={{ position:"relative", display:"inline-block", lineHeight:0 }}>
@@ -95,7 +117,9 @@ export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce =
       <div
         className={bodyAnim}
         style={{
-          width: size, height: size * 1.18 * stage.scale, transform:`scale(${stage.scale})`,
+          width: size, height: size * 1.18 * stage.scale,
+          transform:`scale(${stage.scale}) scaleY(${poseScaleY}) translateY(${poseOffsetY}px)`,
+          transition:"transform 1.4s cubic-bezier(.4,0,.2,1)",
           filter:`drop-shadow(0 10px 24px ${stage.color}50) drop-shadow(0 3px 8px #00000038)`,
         }}
       >
@@ -107,13 +131,14 @@ export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce =
           blink={blink}
           lookOffset={lookOffset}
           headTilt={headTilt}
-          earAngle={ears}
+          earAngle={earAnglePose}
         />
       </div>
 
       <style>{`
         .fox-idle    { animation: foxIdle    3.8s ease-in-out infinite; }
         .fox-bounce  { animation: foxBounce  0.55s cubic-bezier(.36,.07,.19,.97) both; }
+        .fox-hop     { animation: foxHop     0.5s  cubic-bezier(.36,.07,.19,.97) both; }
         .fox-breathe { animation: foxBreathe 4.5s ease-in-out infinite; }
         .fox-sad     { animation: foxSad     4s   ease-in-out infinite; }
         .fox-excited { animation: foxExcited 0.85s ease-in-out infinite; }
@@ -132,6 +157,12 @@ export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce =
           45% { transform:scale(.94,1.06) translateY(-13px); }
           65% { transform:scale(1.04,.97) translateY(3px); }
           82% { transform:scale(.98,1.02) translateY(-4px); }
+          100%{ transform:scale(1) translateY(0); }
+        }
+        @keyframes foxHop {
+          0%  { transform:scale(1) translateY(0); }
+          35% { transform:scale(1.04,.96) translateY(-10px); }
+          70% { transform:scale(.98,1.02) translateY(2px); }
           100%{ transform:scale(1) translateY(0); }
         }
         @keyframes foxBreathe {
