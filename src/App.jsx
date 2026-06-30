@@ -117,22 +117,48 @@ function save(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch{} }
 function todayKey(){ return new Date().toISOString().split("T")[0]; }
 
 // ─── FOX STATE LOGIC ─────────────────────────────────────────────────────────
-function computeFoxMood(hunger, energy) {
-  if (hunger > 75) return "sad";
-  if (hunger < 25 && energy > 60) return "excited";
-  if (hunger < 40 && energy > 45) return "happy";
+function computeFoxMood(hunger, energy, happiness) {
+  if (hunger > 75 || happiness < 25) return "sad";
+  if (hunger < 25 && energy > 60 && happiness > 70) return "excited";
+  if (hunger < 40 && energy > 45 && happiness > 50) return "happy";
   if (energy < 25) return "sad";
   return "neutral";
 }
 
+// Stima qualità pasto 0-1 basata su bilanciamento macro (non solo calorie)
+function mealQuality(food) {
+  const p = food.p||0, c = food.c||0, f = food.f||0;
+  const tot = p+c+f;
+  if (tot === 0) return 0.5;
+  const pRatio = p/tot;
+  // pasto con buona quota proteica = qualità più alta, grassi eccessivi la abbassano
+  let q = 0.45 + pRatio*0.4;
+  if (f/tot > 0.55) q -= 0.15;
+  return Math.max(0.2, Math.min(1, q));
+}
+
 function getFoodEffect(food) {
+  const quality = mealQuality(food);
+  const happinessDelta = Math.round(8 + quality*12); // 8-20
   switch(food.type) {
-    case "protein": return { hungerDelta:-35, energyDelta:+20, label:"Energia stabile!" };
-    case "carb":    return { hungerDelta:-30, energyDelta:+30, label:"Carica subito!"   };
-    case "fat":     return { hungerDelta:-25, energyDelta:+10, label:"Sazio e calmo!"   };
-    case "light":   return { hungerDelta:-15, energyDelta:+8,  label:"Leggero e fresco!"};
-    default:        return { hungerDelta:-20, energyDelta:+15, label:"Buono!"           };
+    case "protein": return { hungerDelta:-35, energyDelta:+20, happinessDelta, label:"Energia stabile!"   , reaction:"energetic" };
+    case "carb":    return { hungerDelta:-30, energyDelta:+30, happinessDelta, label:"Carica subito!"     , reaction:"energetic" };
+    case "fat":     return { hungerDelta:-25, energyDelta:+10, happinessDelta, label:"Sazio e calmo!"     , reaction:"neutral"   };
+    case "light":   return { hungerDelta:-15, energyDelta:+8,  happinessDelta, label:"Leggero e fresco!"  , reaction:"happy"     };
+    default:        return { hungerDelta:-20, energyDelta:+15, happinessDelta, label:"Buono!"             , reaction:"happy"     };
   }
+}
+
+// Messaggi reazione mostrati nel popup dopo il pasto
+const REACTION_MESSAGES = {
+  happy:     ["Che buono!", "Mi piace!", "Delizioso!"],
+  energetic: ["Che carica!", "Sento l'energia!", "Forza pura!"],
+  neutral:   ["Mmh, ok.", "Va bene così.", "Non male."],
+  sad:       ["Avrei voluto di meglio...", "Speravo in altro."],
+};
+function pickReaction(type) {
+  const arr = REACTION_MESSAGES[type] || REACTION_MESSAGES.neutral;
+  return arr[Math.floor(Math.random()*arr.length)];
 }
 
 function getStreak(log) {
@@ -192,10 +218,11 @@ export default function NutriFox() {
   const [aiLoading, setAiLoading] = useState(false);
   const chatEndRef = useRef(null);
 
-  // Fox state
-  const [foxState,  setFoxState]  = useState(()=>load("nf_foxstate",{hunger:50,energy:50}));
+  // Fox state — esteso con happiness, health, lastFedAt (campi originali invariati)
+  const [foxState,  setFoxState]  = useState(()=>load("nf_foxstate",{hunger:50,energy:50,happiness:70,health:90,lastFedAt:null}));
   const [bounce,    setBounce]    = useState(false);
   const [feedLabel, setFeedLabel] = useState("");
+  const [reaction,  setReaction]  = useState(null); // {type, message} — popup temporaneo 2-3s
   const [tempName,  setTempName]  = useState("Foxy");
   const [tempGoal,  setTempGoal]  = useState("mangiare_meglio");
 
@@ -224,15 +251,18 @@ export default function NutriFox() {
   useEffect(()=>save("nf_aimsg",aiMessages.slice(-40)),[aiMessages]);
   useEffect(()=>{ chatEndRef.current?.scrollIntoView({behavior:"smooth"}); },[aiMessages]);
 
-  // Hunger grows over time
+  // Decay system leggero: ogni minuto hunger sale, energy scende.
+  // Se hunger troppo alto, happiness scende di conseguenza. Health segue happiness nel tempo.
   useEffect(()=>{
     const iv = setInterval(()=>{
       setFoxState(prev=>{
-        const hunger = Math.min(100, prev.hunger+2);
-        const energy = Math.max(0, prev.energy-1);
-        return {hunger,energy};
+        const hunger    = Math.min(100, prev.hunger+2);
+        const energy    = Math.max(0, prev.energy-1);
+        const happiness = hunger > 70 ? Math.max(0, (prev.happiness??70)-2) : (prev.happiness??70);
+        const health    = happiness < 30 ? Math.max(0, (prev.health??90)-1) : (prev.health??90);
+        return { ...prev, hunger, energy, happiness, health };
       });
-    }, 60000); // every minute
+    }, 60000); // ogni minuto
     return ()=>clearInterval(iv);
   },[]);
 
@@ -240,7 +270,7 @@ export default function NutriFox() {
   const todayData= dailyLog[today]||{meals:[]};
   const streak   = getStreak(dailyLog);
   const stage    = getFoxStage(streak);
-  const mood     = computeFoxMood(foxState.hunger, foxState.energy);
+  const mood     = computeFoxMood(foxState.hunger, foxState.energy, foxState.happiness??70);
 
   function goalKcal(){
     const bmr=calcBMR(Number(profile.weight),Number(profile.height),Number(profile.age),profile.sex);
@@ -329,13 +359,24 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
     setTimeout(()=>setFeedLabel(""),2000);
   }
 
+  // Reaction popup: appare sopra la volpe per 2.5s dopo ogni pasto
+  function triggerReaction(type){
+    const message = pickReaction(type);
+    setReaction({ type, message });
+    setTimeout(()=>setReaction(null), 2500);
+  }
+
   function addFood(food){
     const effect=getFoodEffect(food);
     setFoxState(prev=>({
+      ...prev,
       hunger:Math.max(0,prev.hunger+effect.hungerDelta),
       energy:Math.min(100,prev.energy+effect.energyDelta),
+      happiness:Math.min(100,(prev.happiness??70)+effect.happinessDelta),
+      lastFedAt:Date.now(),
     }));
     triggerBounce(effect.label);
+    triggerReaction(effect.reaction);
     const entry={...food,meal:mealType,time:new Date().toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"})};
     setDailyLog(prev=>({...prev,[today]:{meals:[...(prev[today]?.meals||[]),entry]}}));
     setRecentFoods(prev=>[food,...prev.filter(f=>f.name!==food.name)].slice(0,20));
@@ -443,7 +484,7 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
         <div style={{color:C.muted,fontSize:10,textAlign:"center",marginTop:6}}>Powered by Claude · I dati rimangono sul tuo dispositivo</div>
       </div>
 
-      <style>{`@keyframes dotBounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}`}</style>
+      <style>{`@keyframes dotBounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}@keyframes floatUp{0%{transform:translateX(-50%) translateY(0);opacity:1}100%{transform:translateX(-50%) translateY(-30px);opacity:0}}@keyframes reactionPop{0%{transform:translateX(-50%) translateY(6px) scale(0.9);opacity:0}15%{transform:translateX(-50%) translateY(0) scale(1);opacity:1}80%{transform:translateX(-50%) translateY(0) scale(1);opacity:1}100%{transform:translateX(-50%) translateY(-10px) scale(0.95);opacity:0}}`}</style>
     </div>
   );
 
@@ -694,8 +735,11 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
 
   // ── HOME ──────────────────────────────────────────────────────────────────────
   const moodLabels={happy:"Soddisfatta",excited:"Euforica!",neutral:"Tranquilla",sad:"Ho fame..."};
+  const moodEmoji ={happy:"😊",excited:"🤩",neutral:"😌",sad:"😟"};
   const hungerColor=foxState.hunger>70?C.accent:foxState.hunger>40?C.gold:C.green;
   const energyColor=foxState.energy>60?C.green:foxState.energy>30?C.gold:C.accent;
+  const happinessColor=(foxState.happiness??70)>60?C.green:(foxState.happiness??70)>30?C.gold:C.accent;
+  const reactionColors={happy:C.green,energetic:C.gold,neutral:C.purple,sad:C.accent};
 
   return(
     <div style={{minHeight:"100vh",background:C.bg,fontFamily:"system-ui,sans-serif",maxWidth:420,margin:"0 auto",padding:"16px 16px 100px"}}>
@@ -712,14 +756,14 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
         </div>
       </div>
 
-      {/* FOX CARD — central and dominant */}
+      {/* FOX CARD — central and dominant: lo stato emotivo è ora il focus primario */}
       <div style={{background:`linear-gradient(160deg,${C.card} 0%,#120D20 100%)`,border:`1px solid ${stage.aura?C.gold:C.cardBorder}`,borderRadius:28,padding:"20px 16px",marginBottom:14,textAlign:"center",position:"relative",overflow:"hidden"}}>
         {/* background glow */}
         <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:200,height:200,background:`radial-gradient(circle,${stage.color}18 0%,transparent 70%)`,pointerEvents:"none"}}/>
 
         <div style={{position:"absolute",top:14,right:16,background:`${stage.color}22`,border:`1px solid ${stage.color}`,borderRadius:20,padding:"3px 10px",fontSize:11,color:stage.color,fontWeight:700}}>{stage.name}</div>
 
-        {/* Fox */}
+        {/* Fox + reaction popup + feed label */}
         <div style={{position:"relative",display:"inline-block"}}>
           <Fox mood={mood} streak={streak} size={160} bounce={bounce}/>
           {feedLabel&&(
@@ -727,18 +771,29 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
               {feedLabel}
             </div>
           )}
+          {/* Reaction popup — feedback emotivo dopo ogni pasto, 2-3s */}
+          {reaction&&(
+            <div style={{position:"absolute",top:-38,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1.5px solid ${reactionColors[reaction.type]||C.purple}`,borderRadius:16,padding:"6px 14px",fontSize:12,fontWeight:600,color:reactionColors[reaction.type]||C.purple,whiteSpace:"nowrap",animation:"reactionPop 2.5s ease-out forwards",boxShadow:`0 4px 14px #00000055`,zIndex:5}}>
+              {reaction.message}
+            </div>
+          )}
         </div>
 
+        {/* Stato emotivo — ora elemento centrale, più evidente del tracker calorico */}
         <div style={{color:C.text,fontWeight:700,fontSize:16,marginTop:4}}>{foxName}</div>
-        <div style={{color:stage.color,fontSize:12,fontWeight:600,marginBottom:10}}>{moodLabels[mood]||"Tranquilla"}</div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginBottom:12}}>
+          <span style={{fontSize:18}}>{moodEmoji[mood]||"😌"}</span>
+          <span style={{color:stage.color,fontSize:14,fontWeight:700}}>{moodLabels[mood]||"Tranquilla"}</span>
+        </div>
         <button onClick={()=>setScreen("coach")} style={{background:`linear-gradient(135deg,${C.purple}33,${C.purple}11)`,border:`1px solid ${C.purple}55`,borderRadius:20,color:C.purple,padding:"6px 18px",fontSize:12,fontWeight:700,cursor:"pointer",marginBottom:14,transition:"all 0.2s"}}>
           Parla con {foxName} ✨
         </button>
 
-        {/* Fox stats */}
-        <div style={{display:"flex",gap:12,marginBottom:14}}>
+        {/* Fox stats — ora 3 barre: fame, energia, felicità */}
+        <div style={{display:"flex",gap:10,marginBottom:14}}>
           <StatBar label="Fame" value={foxState.hunger} color={hungerColor} icon="🍽️"/>
           <StatBar label="Energia" value={foxState.energy} color={energyColor} icon="⚡"/>
+          <StatBar label="Felicità" value={foxState.happiness??70} color={happinessColor} icon="💖"/>
         </div>
 
         {/* Streak progress */}
@@ -756,26 +811,26 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
         {streak>=30&&<div style={{color:C.gold,fontSize:12,fontWeight:700}}>Hai raggiunto il massimo!</div>}
       </div>
 
-      {/* Calorie card */}
-      <div style={{background:C.card,border:`1px solid ${C.cardBorder}`,borderRadius:20,padding:"16px",marginBottom:14}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+      {/* Calorie card — peso visivo leggermente ridotto, la volpe resta il focus */}
+      <div style={{background:C.card,border:`1px solid ${C.cardBorder}`,borderRadius:18,padding:"13px 16px",marginBottom:14,opacity:0.92}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
           <div>
-            <div style={{color:C.muted,fontSize:11,marginBottom:2}}>Calorie oggi</div>
-            <div style={{color:C.text,fontSize:26,fontWeight:800}}>{totalKcal}<span style={{color:C.muted,fontSize:13,fontWeight:400}}> / {gKcal}</span></div>
+            <div style={{color:C.muted,fontSize:10,marginBottom:1}}>Calorie oggi</div>
+            <div style={{color:C.text,fontSize:21,fontWeight:700}}>{totalKcal}<span style={{color:C.muted,fontSize:12,fontWeight:400}}> / {gKcal}</span></div>
           </div>
           <div style={{textAlign:"right"}}>
-            <div style={{color:C.muted,fontSize:11}}>{GOALS[goalKey].emoji} {GOALS[goalKey].label}</div>
-            <div style={{color:totalKcal>gKcal?C.accent:C.green,fontSize:13,fontWeight:700}}>{totalKcal>gKcal?"+"+(totalKcal-gKcal)+" kcal":(gKcal-totalKcal)+" rimaste"}</div>
+            <div style={{color:C.muted,fontSize:10}}>{GOALS[goalKey].emoji} {GOALS[goalKey].label}</div>
+            <div style={{color:totalKcal>gKcal?C.accent:C.green,fontSize:12,fontWeight:600}}>{totalKcal>gKcal?"+"+(totalKcal-gKcal)+" kcal":(gKcal-totalKcal)+" rimaste"}</div>
           </div>
         </div>
-        <div style={{height:8,background:"#0F0A1A",borderRadius:4,overflow:"hidden",marginBottom:12}}>
-          <div style={{height:"100%",width:`${Math.min((totalKcal/gKcal)*100,100)}%`,background:`linear-gradient(90deg,${C.accent},${C.gold})`,borderRadius:4,transition:"width 0.5s"}}/>
+        <div style={{height:6,background:"#0F0A1A",borderRadius:3,overflow:"hidden",marginBottom:10}}>
+          <div style={{height:"100%",width:`${Math.min((totalKcal/gKcal)*100,100)}%`,background:`linear-gradient(90deg,${C.accent},${C.gold})`,borderRadius:3,transition:"width 0.5s"}}/>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
           {[["P",totalP,C.purple],["C",totalC,C.gold],["G",totalF,C.accent]].map(([l,v,col])=>(
-            <div key={l} style={{background:"#0F0A1A",borderRadius:8,padding:"6px 8px",textAlign:"center"}}>
-              <div style={{color:col,fontSize:15,fontWeight:700}}>{Math.round(v)}g</div>
-              <div style={{color:C.muted,fontSize:10}}>{l==="P"?"Proteine":l==="C"?"Carb.":"Grassi"}</div>
+            <div key={l} style={{background:"#0F0A1A",borderRadius:8,padding:"5px 8px",textAlign:"center"}}>
+              <div style={{color:col,fontSize:13,fontWeight:700}}>{Math.round(v)}g</div>
+              <div style={{color:C.muted,fontSize:9}}>{l==="P"?"Proteine":l==="C"?"Carb.":"Grassi"}</div>
             </div>
           ))}
         </div>
