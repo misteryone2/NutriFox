@@ -15,6 +15,8 @@ export function useFoxAnimations(mood) {
   const [lookOffset,setLookOffset]= useState({ x: 0, y: 0 });
   const [headTilt,  setHeadTilt]  = useState(0);
   const [tailFlick, setTailFlick] = useState(false);
+  const [earTwitch, setEarTwitch] = useState(false);
+  const [hop,       setHop]       = useState(false);
 
   const timers = useRef([]);
 
@@ -57,7 +59,7 @@ export function useFoxAnimations(mood) {
       const delay = randBetween(8000, 15000);
       const t = setTimeout(() => {
         if (!active) return;
-        const choice = Math.floor(randBetween(0, 3));
+        const choice = Math.floor(randBetween(0, 5));
         if (choice === 0) {
           // sguardo laterale
           const x = randBetween(-2.5, 2.5);
@@ -71,11 +73,23 @@ export function useFoxAnimations(mood) {
           setHeadTilt(tilt);
           const t2 = setTimeout(() => { if(active) setHeadTilt(0); }, 1500);
           timers.current.push(t2);
-        } else {
+        } else if (choice === 2) {
           // colpo di coda extra
           setTailFlick(true);
           const t2 = setTimeout(() => { if(active) setTailFlick(false); }, 600);
           timers.current.push(t2);
+        } else if (choice === 3) {
+          // movimento orecchie
+          setEarTwitch(true);
+          const t2 = setTimeout(() => { if(active) setEarTwitch(false); }, 500);
+          timers.current.push(t2);
+        } else {
+          // piccolo salto occasionale, solo se sveglia e non già impegnata
+          if (mood !== "sad") {
+            setHop(true);
+            const t2 = setTimeout(() => { if(active) setHop(false); }, 500);
+            timers.current.push(t2);
+          }
         }
         scheduleIdleEvent();
       }, delay);
@@ -88,5 +102,5 @@ export function useFoxAnimations(mood) {
 
   useEffect(() => () => clearAllTimers(), []);
 
-  return { blink, lookOffset, headTilt, tailFlick };
+  return { blink, lookOffset, headTilt, tailFlick, earTwitch, hop };
 }
