@@ -161,6 +161,45 @@ function pickReaction(type) {
   return arr[Math.floor(Math.random()*arr.length)];
 }
 
+// ─── DIALOGHI CONTESTUALI ────────────────────────────────────────────────────
+// Frasi affettuose e mai giudicanti, scelte in base alla situazione reale della giornata.
+// Priorità: bisogni fisici > memoria pasti di oggi > stato emotivo generico.
+function getContextualMessage(ctx) {
+  const { hoursSinceLastFed, water, targetWater, totalP, mealsCount, totalKcal, gKcal, mood, foxName } = ctx;
+
+  if (hoursSinceLastFed != null && hoursSinceLastFed >= 5) {
+    return "È da tanto che non mangiamo... quando vuoi io ci sono!";
+  }
+  if (water < targetWater * 0.4 && mealsCount > 0) {
+    return "Ho un po' sete... un bicchiere d'acqua? 💧";
+  }
+  if (totalP < 20 && mealsCount >= 2) {
+    return "Oggi ci servirebbe un po' più di forza, che ne dici di qualcosa di proteico?";
+  }
+  if (mealsCount === 3) {
+    return "Questo è il terzo pasto di oggi, stiamo andando alla grande!";
+  }
+  if (water >= targetWater && mealsCount > 0) {
+    return "Hai già bevuto abbastanza, bravissimo!";
+  }
+  if (totalKcal > 0 && totalKcal <= gKcal && mealsCount >= 2) {
+    return "Stai rispettando il tuo obiettivo, sono fiera di te!";
+  }
+  if (mood === "excited") {
+    return "Mi sento davvero bene oggi! ✨";
+  }
+  if (mood === "happy") {
+    return "Che bella giornata insieme!";
+  }
+  if (mood === "sad") {
+    return "Un po' giù di energie... ma so che ci riprendiamo!";
+  }
+  if (mealsCount === 0) {
+    return `Ehi, sono ${foxName}! Pronta quando vuoi iniziare la giornata 🦊`;
+  }
+  return "Sono curiosa di scoprire cosa mangiamo oggi!";
+}
+
 function getStreak(log) {
   let s=0; const today=new Date();
   for(let i=0;i<60;i++){
@@ -223,6 +262,8 @@ export default function NutriFox() {
   const [bounce,    setBounce]    = useState(false);
   const [feedLabel, setFeedLabel] = useState("");
   const [reaction,  setReaction]  = useState(null); // {type, message} — popup temporaneo 2-3s
+  const [reward,    setReward]    = useState(null); // {icon} — effetto ricompensa <2s (streak/acqua/obiettivo/evoluzione)
+  const [celebratedToday, setCelebratedToday] = useState(()=>load("nf_celebrated_"+todayKey(),{}));
   const [tempName,  setTempName]  = useState("Foxy");
   const [tempGoal,  setTempGoal]  = useState("mangiare_meglio");
 
@@ -250,6 +291,7 @@ export default function NutriFox() {
   useEffect(()=>save("nf_foxstate",foxState),[foxState]);
   useEffect(()=>save("nf_aimsg",aiMessages.slice(-40)),[aiMessages]);
   useEffect(()=>{ chatEndRef.current?.scrollIntoView({behavior:"smooth"}); },[aiMessages]);
+  useEffect(()=>save("nf_celebrated_"+todayKey(),celebratedToday),[celebratedToday]);
 
   // Decay system leggero: ogni minuto hunger sale, energy scende.
   // Se hunger troppo alto, happiness scende di conseguenza. Health segue happiness nel tempo.
@@ -289,6 +331,38 @@ export default function NutriFox() {
   const weekDays = Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-i);return d.toISOString().split("T")[0];});
   const weekKcals= weekDays.map(d=>(dailyLog[d]?.meals||[]).reduce((s,m)=>s+m.kcal,0));
   const weekAvg  = Math.round(weekKcals.filter(k=>k>0).reduce((s,k)=>s+k,0)/(weekKcals.filter(k=>k>0).length||1));
+
+  const hoursSinceLastFed = foxState.lastFedAt ? (Date.now()-foxState.lastFedAt)/3600000 : null;
+
+  const contextualMessage = getContextualMessage({
+    hoursSinceLastFed, water, targetWater, totalP, mealsCount:todayData.meals.length,
+    totalKcal, gKcal, mood, foxName,
+  });
+
+  // Effetti di ricompensa (punto 5): si attivano una sola volta per evento al giorno, niente loop di re-render.
+  useEffect(()=>{
+    if (todayData.meals.length>0 && totalKcal<=gKcal && totalKcal>=gKcal*0.85 && !celebratedToday.goal) {
+      setReward({icon:"🎯"});
+      setCelebratedToday(p=>({...p,goal:true}));
+      setTimeout(()=>setReward(null),1800);
+    }
+  },[totalKcal,gKcal]);
+
+  useEffect(()=>{
+    if (water>=targetWater && targetWater>0 && !celebratedToday.water) {
+      setReward({icon:"💧"});
+      setCelebratedToday(p=>({...p,water:true}));
+      setTimeout(()=>setReward(null),1800);
+    }
+  },[water,targetWater]);
+
+  useEffect(()=>{
+    if (streak>0 && streak%7===0 && !celebratedToday["streak"+streak]) {
+      setReward({icon:"🔥"});
+      setCelebratedToday(p=>({...p,["streak"+streak]:true}));
+      setTimeout(()=>setReward(null),1800);
+    }
+  },[streak]);
 
   // Food lists
   const categories=["Recenti","Preferiti","Tutti",...Object.keys(FOOD_DB)];
@@ -484,7 +558,7 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
         <div style={{color:C.muted,fontSize:10,textAlign:"center",marginTop:6}}>Powered by Claude · I dati rimangono sul tuo dispositivo</div>
       </div>
 
-      <style>{`@keyframes dotBounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}@keyframes floatUp{0%{transform:translateX(-50%) translateY(0);opacity:1}100%{transform:translateX(-50%) translateY(-30px);opacity:0}}@keyframes reactionPop{0%{transform:translateX(-50%) translateY(6px) scale(0.9);opacity:0}15%{transform:translateX(-50%) translateY(0) scale(1);opacity:1}80%{transform:translateX(-50%) translateY(0) scale(1);opacity:1}100%{transform:translateX(-50%) translateY(-10px) scale(0.95);opacity:0}}`}</style>
+      <style>{`@keyframes dotBounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}@keyframes floatUp{0%{transform:translateX(-50%) translateY(0);opacity:1}100%{transform:translateX(-50%) translateY(-30px);opacity:0}}@keyframes reactionPop{0%{transform:translateX(-50%) translateY(6px) scale(0.9);opacity:0}15%{transform:translateX(-50%) translateY(0) scale(1);opacity:1}80%{transform:translateX(-50%) translateY(0) scale(1);opacity:1}100%{transform:translateX(-50%) translateY(-10px) scale(0.95);opacity:0}}@keyframes rewardPop{0%{transform:translateX(-50%) scale(0.4) rotate(-10deg);opacity:0}25%{transform:translateX(-50%) scale(1.3) rotate(8deg);opacity:1}45%{transform:translateX(-50%) scale(1) rotate(-4deg);opacity:1}100%{transform:translateX(-50%) translateY(-26px) scale(0.9) rotate(0deg);opacity:0}}@keyframes rewardShake{0%,100%{transform:translateX(0)}20%{transform:translateX(-2px)}40%{transform:translateX(2px)}60%{transform:translateX(-1.5px)}80%{transform:translateX(1.5px)}}.reward-shake{animation:rewardShake 0.4s ease-in-out 2}`}</style>
     </div>
   );
 
@@ -757,15 +831,22 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
       </div>
 
       {/* FOX CARD — central and dominant: lo stato emotivo è ora il focus primario */}
-      <div style={{background:`linear-gradient(160deg,${C.card} 0%,#120D20 100%)`,border:`1px solid ${stage.aura?C.gold:C.cardBorder}`,borderRadius:28,padding:"20px 16px",marginBottom:14,textAlign:"center",position:"relative",overflow:"hidden"}}>
+      <div className={reward?"reward-shake":""} style={{background:`linear-gradient(160deg,${C.card} 0%,#120D20 100%)`,border:`1px solid ${stage.aura?C.gold:C.cardBorder}`,borderRadius:28,padding:"20px 16px",marginBottom:14,textAlign:"center",position:"relative",overflow:"hidden"}}>
         {/* background glow */}
         <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:200,height:200,background:`radial-gradient(circle,${stage.color}18 0%,transparent 70%)`,pointerEvents:"none"}}/>
 
         <div style={{position:"absolute",top:14,right:16,background:`${stage.color}22`,border:`1px solid ${stage.color}`,borderRadius:20,padding:"3px 10px",fontSize:11,color:stage.color,fontWeight:700}}>{stage.name}</div>
 
+        {/* Effetto ricompensa — meno di 2s, sopra tutta la card */}
+        {reward&&(
+          <div style={{position:"absolute",top:10,left:"50%",transform:"translateX(-50%)",fontSize:30,animation:"rewardPop 1.7s ease-out forwards",pointerEvents:"none",zIndex:6}}>
+            {reward.icon}
+          </div>
+        )}
+
         {/* Fox + reaction popup + feed label */}
         <div style={{position:"relative",display:"inline-block"}}>
-          <Fox mood={mood} streak={streak} size={160} bounce={bounce}/>
+          <Fox mood={mood} streak={streak} size={160} bounce={bounce} lastFedAt={foxState.lastFedAt}/>
           {feedLabel&&(
             <div style={{position:"absolute",top:-10,left:"50%",transform:"translateX(-50%)",background:`linear-gradient(135deg,${C.accent},#E8553F)`,borderRadius:20,padding:"5px 14px",fontSize:13,fontWeight:700,color:"white",whiteSpace:"nowrap",animation:"floatUp 2s ease-out forwards",boxShadow:`0 4px 16px ${C.accent}55`}}>
               {feedLabel}
@@ -779,11 +860,14 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
           )}
         </div>
 
-        {/* Stato emotivo — ora elemento centrale, più evidente del tracker calorico */}
+        {/* Stato emotivo — fumetto con dialogo contestuale, sostituisce l'etichetta generica */}
         <div style={{color:C.text,fontWeight:700,fontSize:16,marginTop:4}}>{foxName}</div>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginBottom:12}}>
-          <span style={{fontSize:18}}>{moodEmoji[mood]||"😌"}</span>
-          <span style={{color:stage.color,fontSize:14,fontWeight:700}}>{moodLabels[mood]||"Tranquilla"}</span>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginBottom:8}}>
+          <span style={{fontSize:16}}>{moodEmoji[mood]||"😌"}</span>
+          <span style={{color:stage.color,fontSize:12,fontWeight:700}}>{moodLabels[mood]||"Tranquilla"}</span>
+        </div>
+        <div style={{background:"#0F0A1A99",borderRadius:14,padding:"8px 14px",margin:"0 8px 12px",fontSize:12.5,color:C.text,lineHeight:1.4,fontStyle:"italic"}}>
+          "{contextualMessage}"
         </div>
         <button onClick={()=>setScreen("coach")} style={{background:`linear-gradient(135deg,${C.purple}33,${C.purple}11)`,border:`1px solid ${C.purple}55`,borderRadius:20,color:C.purple,padding:"6px 18px",fontSize:12,fontWeight:700,cursor:"pointer",marginBottom:14,transition:"all 0.2s"}}>
           Parla con {foxName} ✨
