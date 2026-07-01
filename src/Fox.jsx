@@ -1,94 +1,35 @@
-import { useFoxAnimations } from "./FoxAnimations";
+import { useFoxBrain } from "./FoxBrain";
+import { useFoxAnimations, getAnimationIntent } from "./FoxAnimations";
 import FoxSVG from "./FoxSVG";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Fox.jsx — componente principale: calcola stato visivo (mood, stadio, pose, colori)
-// e lo passa al disegno puro (FoxSVG) e alle animazioni idle (FoxAnimations).
+// Fox.jsx v1.4 — orchestratore puro.
+// Non contiene logica derivativa: tutto viene da useFoxBrain e useFoxAnimations.
+// Responsabilità: assemblare le props, applicare il wrapper CSS, mostrare particelle.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Re-export per compatibilità con App.jsx (che importa getFoxStage)
 export function getFoxStage(streak) {
-  if (streak >= 30) return { name:"Leggendaria", color:"#F9C74F", aura:true,  scale:1.12, legs:"tall"  };
-  if (streak >= 14) return { name:"Adulta",      color:"#A78BFA", aura:false, scale:1.06, legs:"normal"};
-  if (streak >= 7)  return { name:"Giovane",     color:"#6FCF97", aura:false, scale:1.02, legs:"normal"};
-  return                   { name:"Cucciolo",    color:"#F4845F", aura:false, scale:1.0,  legs:"short" };
+  if (streak >= 30) return { name:"Leggendaria", color:"#F9C74F", aura:true,  scale:1.12 };
+  if (streak >= 14) return { name:"Adulta",      color:"#A78BFA", aura:false, scale:1.06 };
+  if (streak >= 7)  return { name:"Giovane",     color:"#6FCF97", aura:false, scale:1.02 };
+  return                   { name:"Cucciolo",    color:"#F4845F", aura:false, scale:1.0  };
 }
-
-// Pose in base a quante ore sono passate dall'ultimo pasto. Pure function, nessun timer.
-export function getFoxPose(hoursSinceLastFed) {
-  if (hoursSinceLastFed == null) return "awake";
-  if (hoursSinceLastFed >= 6) return "asleep";
-  if (hoursSinceLastFed >= 4) return "lying";
-  if (hoursSinceLastFed >= 2) return "sitting";
-  return "awake";
-}
-
-// Espressioni per mood — ogni proprietà guida una parte del disegno in FoxSVG
-const MOOD_EXPR = {
-  happy: {
-    bY:-3, bCurve:6, mouth:"M 46 65 Q 52 72 58 65",
-    eH:0.62, open:true, cheeksUp:true, mouthFill:true, mouthFillOpacity:0.18,
-    sparkleBrows:false, earMood:"relaxed",
-  },
-  excited: {
-    bY:-6, bCurve:9, mouth:"M 43 64 Q 52 76 61 64",
-    eH:1.12, open:true, cheeksUp:true, mouthFill:true, mouthFillOpacity:0.22,
-    sparkleBrows:true, earMood:"up",
-  },
-  neutral: {
-    bY:0, bCurve:1, mouth:"M 46 67 Q 52 70 58 67",
-    eH:1.0, open:true, cheeksUp:false, mouthFill:false,
-    sparkleBrows:false, earMood:"up",
-  },
-  sad: {
-    bY:4, bCurve:-5, mouth:"M 46 71 Q 52 65 58 71",
-    eH:0.88, open:true, cheeksUp:false, mouthFill:false,
-    sparkleBrows:false, earMood:"down",
-  },
-  sleeping: {
-    bY:0, bCurve:0, mouth:"M 46 67 Q 52 70 58 67",
-    eH:0, open:false, sleepy:true, cheeksUp:false, mouthFill:false,
-    sparkleBrows:false, earMood:"relaxed",
-  },
-};
-
-const EAR_ANGLES = {
-  up:       { left:0,  right:0  },
-  relaxed:  { left:6,  right:-6 },
-  down:     { left:14, right:-14},
-};
 
 export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFedAt = null }) {
-  const stage = getFoxStage(streak);
-  const ex    = MOOD_EXPR[mood] || MOOD_EXPR.neutral;
-  const ears  = EAR_ANGLES[ex.earMood] || EAR_ANGLES.up;
 
-  const hoursSinceLastFed = lastFedAt ? (Date.now() - lastFedAt) / 3600000 : null;
-  const pose = mood === "sleeping" ? "asleep" : getFoxPose(hoursSinceLastFed);
+  // 1. Calcola intent dall'esterno (non dentro useFoxBrain, rimane coerente con FoxAnimations)
+  const intent = getAnimationIntent(mood);
 
-  const { blink, lookOffset, headTilt, tailFlick, earTwitch, hop } = useFoxAnimations(mood);
+  // 2. Micro-animazioni idle: scheduler unico, valori boolean/numerici
+  const { blink, lookOffset, headTilt, tailFlick, earTwitch, hop } = useFoxAnimations(intent);
 
-  // Colori outfit per stadio
-  const sw = streak>=30?"#D4A830":streak>=14?"#7C3AED":streak>=7?"#16A34A":"#C8B49A";
-  const swD= streak>=30?"#A07820":streak>=14?"#5B21B6":streak>=7?"#14532D":"#A89278";
-  const pt = streak>=30?"#7C3A0A":streak>=14?"#3B0764":streak>=7?"#052E16":"#4A3020";
+  // 3. Tutte le derivazioni visive: un oggetto unico, nessuna logica inline qui
+  const brain = useFoxBrain({ mood, streak, lastFedAt, bounce, hop, earTwitch });
 
-  const bodyAnim = bounce            ? "fox-bounce"
-    : hop                            ? "fox-hop"
-    : pose === "asleep"              ? "fox-breathe"
-    : mood === "sleeping"            ? "fox-breathe"
-    : mood === "sad"                 ? "fox-sad"
-    : mood === "excited"             ? "fox-excited"
-    : "fox-idle";
+  const { stage, poseTransform, bodyAnim, tailSpeed } = brain;
 
-  const tailAnimSpeed = mood === "excited" ? "1.8s" : mood === "sad" ? "5s" : tailFlick ? "0.5s" : "3.5s";
-
-  // Pose del corpo: sveglio = scala piena, seduta/sdraiata/dorme = leggera compressione verticale.
-  // Cambio graduale tramite transition CSS, nessun salto brusco.
-  const poseScaleY = pose === "asleep" ? 0.78 : pose === "lying" ? 0.85 : pose === "sitting" ? 0.92 : 1;
-  const poseOffsetY = pose === "asleep" ? 10 : pose === "lying" ? 7 : pose === "sitting" ? 4 : 0;
-  const earAnglePose = pose !== "awake"
-    ? { left: ears.left + 10, right: ears.right - 10 }
-    : (earTwitch ? { left: ears.left + 8, right: ears.right } : ears);
+  const showParticles = mood === "happy" || mood === "excited";
 
   return (
     <div style={{ position:"relative", display:"inline-block", lineHeight:0 }}>
@@ -103,7 +44,7 @@ export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce =
       )}
 
       {/* Particelle felicità */}
-      {(mood==="happy"||mood==="excited") && [
+      {showParticles && [
         { t:4,  l:-4, e:"✨", d:0   },
         { t:-2, l:8,  e:"⭐", d:0.3 },
         { t:10, l:12, e:"💫", d:0.6 },
@@ -114,24 +55,28 @@ export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce =
         }}>{p.e}</div>
       ))}
 
+      {/* Wrapper corpo: applica pose (scaleY, offsetY) e animazione */}
       <div
         className={bodyAnim}
         style={{
-          width: size, height: size * 1.18 * stage.scale,
-          transform:`scale(${stage.scale}) scaleY(${poseScaleY}) translateY(${poseOffsetY}px)`,
-          transition:"transform 1.4s cubic-bezier(.4,0,.2,1)",
+          width: size,
+          height: size * 1.18 * stage.scale,
+          transform: `scale(${stage.scale}) scaleY(${poseTransform.scaleY}) translateY(${poseTransform.offsetY}px)`,
+          transition: `transform ${poseTransform.transition}`,
           filter:`drop-shadow(0 10px 24px ${stage.color}50) drop-shadow(0 3px 8px #00000038)`,
         }}
       >
+        {/* FoxSVG: completamente dumb, riceve solo valori visivi già calcolati */}
         <FoxSVG
-          ex={ex}
-          colors={{ sw, swD, pt }}
+          ex={brain.ex}
+          colors={brain.colors}
           streak={streak}
           legendary={stage.aura}
           blink={blink}
           lookOffset={lookOffset}
           headTilt={headTilt}
-          earAngle={earAnglePose}
+          earAngle={brain.earAngle}
+          tailSpeed={tailSpeed}
         />
       </div>
 
@@ -143,58 +88,18 @@ export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce =
         .fox-sad     { animation: foxSad     4s   ease-in-out infinite; }
         .fox-excited { animation: foxExcited 0.85s ease-in-out infinite; }
 
-        .fox-tail-group  { animation: tailwag ${tailAnimSpeed} ease-in-out infinite; }
         .fox-torso-group { animation: torsoBreathe 3.6s ease-in-out infinite; }
         .fox-head-group  { transition: transform 0.5s cubic-bezier(.34,1.4,.64,1); }
 
-        @keyframes foxIdle {
-          0%,100%{ transform:translateY(0); }
-          50%    { transform:translateY(-5px); }
-        }
-        @keyframes foxBounce {
-          0%  { transform:scale(1) translateY(0); }
-          20% { transform:scale(1.08,.93) translateY(5px); }
-          45% { transform:scale(.94,1.06) translateY(-13px); }
-          65% { transform:scale(1.04,.97) translateY(3px); }
-          82% { transform:scale(.98,1.02) translateY(-4px); }
-          100%{ transform:scale(1) translateY(0); }
-        }
-        @keyframes foxHop {
-          0%  { transform:scale(1) translateY(0); }
-          35% { transform:scale(1.04,.96) translateY(-10px); }
-          70% { transform:scale(.98,1.02) translateY(2px); }
-          100%{ transform:scale(1) translateY(0); }
-        }
-        @keyframes foxBreathe {
-          0%,100%{ transform:scale(1); }
-          50%    { transform:scale(1.02) translateY(-2px); }
-        }
-        @keyframes foxSad {
-          0%,100%{ transform:translateY(0) rotate(0deg); }
-          50%    { transform:translateY(5px) rotate(-1deg); }
-        }
-        @keyframes foxExcited {
-          0%,100%{ transform:translateY(0) scale(1); }
-          30%    { transform:translateY(-7px) scale(1.03); }
-          70%    { transform:translateY(-3px) scale(1.01); }
-        }
-        @keyframes torsoBreathe {
-          0%,100%{ transform:scaleY(1); }
-          50%    { transform:scaleY(1.015); }
-        }
-        @keyframes tailwag {
-          0%,100%{ transform:rotate(0deg); }
-          35%    { transform:rotate(10deg); }
-          70%    { transform:rotate(-7deg); }
-        }
-        @keyframes aura {
-          0%,100%{ opacity:.5; transform:scale(1); }
-          50%    { opacity:1;  transform:scale(1.06); }
-        }
-        @keyframes pfloat {
-          0%  { transform:translateY(0);     opacity:1; }
-          100%{ transform:translateY(-50px); opacity:0; }
-        }
+        @keyframes foxIdle    { 0%,100%{ transform:translateY(0); }       50%{ transform:translateY(-5px); } }
+        @keyframes foxBounce  { 0%{transform:scale(1) translateY(0);} 20%{transform:scale(1.08,.93) translateY(5px);} 45%{transform:scale(.94,1.06) translateY(-13px);} 65%{transform:scale(1.04,.97) translateY(3px);} 82%{transform:scale(.98,1.02) translateY(-4px);} 100%{transform:scale(1) translateY(0);} }
+        @keyframes foxHop     { 0%{transform:scale(1) translateY(0);} 35%{transform:scale(1.04,.96) translateY(-10px);} 70%{transform:scale(.98,1.02) translateY(2px);} 100%{transform:scale(1) translateY(0);} }
+        @keyframes foxBreathe { 0%,100%{ transform:scale(1); }            50%{ transform:scale(1.02) translateY(-2px); } }
+        @keyframes foxSad     { 0%,100%{ transform:translateY(0) rotate(0deg); }  50%{ transform:translateY(5px) rotate(-1deg); } }
+        @keyframes foxExcited { 0%,100%{ transform:translateY(0) scale(1); }      30%{ transform:translateY(-7px) scale(1.03); } 70%{ transform:translateY(-3px) scale(1.01); } }
+        @keyframes torsoBreathe { 0%,100%{ transform:scaleY(1); } 50%{ transform:scaleY(1.015); } }
+        @keyframes aura       { 0%,100%{ opacity:.5; transform:scale(1); } 50%{ opacity:1; transform:scale(1.06); } }
+        @keyframes pfloat     { 0%{ transform:translateY(0); opacity:1; } 100%{ transform:translateY(-50px); opacity:0; } }
       `}</style>
     </div>
   );
