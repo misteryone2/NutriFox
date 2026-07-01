@@ -4,7 +4,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function FoxSVG({
-  ex, colors, streak, legendary, blink, lookOffset, headTilt, earAngle,
+  ex, colors, streak, legendary, blink, lookOffset, headTilt, earAngle, tailSpeed = "3.5s",
 }) {
   const { sw, swD, pt } = colors;
   const eyesClosed = ex.open === false || blink;
@@ -60,7 +60,7 @@ export default function FoxSVG({
       <ellipse cx="50" cy="121" rx="28" ry="4" fill="#00000020"/>
 
       {/* CODA — inerzia elastica via CSS, vedi style esterno */}
-      <g className="fox-tail-group" style={{ transformOrigin:"72px 110px" }}>
+      <g className="fox-tail-group" style={{ transformOrigin:"72px 110px", animationDuration: tailSpeed }}>
         <path d="M 72 113 Q 102 92 99 58 Q 96 35 78 45 Q 91 62 83 89 Q 79 104 72 111 Z"
           fill="#00000016" transform="translate(2,4)" filter="url(#blur)"/>
         <path d="M 72 113 Q 102 92 99 58 Q 96 35 78 45 Q 91 62 83 89 Q 79 104 72 111 Z"
