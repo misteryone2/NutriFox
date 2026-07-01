@@ -1,16 +1,58 @@
 import { useState, useEffect, useRef } from "react";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Hook che pilota tutte le micro-animazioni idle della volpe:
-// blink, sguardo, inclinazione testa, colpo di coda.
-// Ogni evento è randomico e indipendente, per dare un effetto "vivo".
+// FoxAnimations.js — scheduler unico per le micro-animazioni idle.
+//
+// v1.4: invece di più setTimeout annidati indipendenti (uno per blink, uno per
+// sguardo/testa/coda...), un solo loop a "tick" valuta ad ogni intervallo quali
+// eventi possono partire, rispettando:
+//  - cooldown individuale per tipo di evento
+//  - probabilità pesata in base all'animation intent
+//  - mutua esclusione (un solo evento "grande" alla volta, il blink è leggero
+//    e può sempre sovrapporsi perché non interferisce visivamente)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function randBetween(min, max) {
-  return Math.random() * (max - min) + min;
+const TICK_MS = 700; // risoluzione dello scheduler
+
+// Intent → pesi relativi degli eventi disponibili. Più alto = più probabile.
+// "idle": comportamento di base, sveglia ma tranquilla
+// "playful": eccitata, eventi più frequenti e vivaci
+// "sleepy": pochi eventi, solo i più delicati
+// "alert": triste/in difficoltà, movimenti minimi e lenti
+const INTENT_WEIGHTS = {
+  idle:    { look:3, tilt:2, tailFlick:2, earTwitch:2, hop:1 },
+  playful: { look:3, tilt:2, tailFlick:4, earTwitch:3, hop:3 },
+  sleepy:  { look:0, tilt:0, tailFlick:0, earTwitch:0, hop:0 },
+  alert:   { look:1, tilt:1, tailFlick:0, earTwitch:1, hop:0 },
+};
+
+// Cooldown minimo (ms) tra due eventi dello stesso tipo
+const COOLDOWNS = { look:4000, tilt:5000, tailFlick:3000, earTwitch:3500, hop:9000 };
+// Durata di ogni evento una volta attivato
+const DURATIONS = { look:1200, tilt:1500, tailFlick:600, earTwitch:500, hop:500 };
+// Tra un evento "corpo" e l'altro lasciamo un minimo di respiro per non sovrapporli
+const GLOBAL_EVENT_GAP = 1800;
+
+export function getAnimationIntent(mood) {
+  if (mood === "sleeping") return "sleepy";
+  if (mood === "sad") return "alert";
+  if (mood === "excited") return "playful";
+  return "idle";
 }
 
-export function useFoxAnimations(mood) {
+function pickWeightedEvent(weights) {
+  const entries = Object.entries(weights).filter(([,w]) => w > 0);
+  const total = entries.reduce((s,[,w]) => s+w, 0);
+  if (total === 0) return null;
+  let r = Math.random() * total;
+  for (const [key, w] of entries) {
+    if (r < w) return key;
+    r -= w;
+  }
+  return null;
+}
+
+export function useFoxAnimations(intent) {
   const [blink,     setBlink]     = useState(false);
   const [lookOffset,setLookOffset]= useState({ x: 0, y: 0 });
   const [headTilt,  setHeadTilt]  = useState(0);
@@ -18,89 +60,96 @@ export function useFoxAnimations(mood) {
   const [earTwitch, setEarTwitch] = useState(false);
   const [hop,       setHop]       = useState(false);
 
-  const timers = useRef([]);
+  const lastFired   = useRef({ look:0, tilt:0, tailFlick:0, earTwitch:0, hop:0 });
+  const lastAnyBody = useRef(0); // ultimo evento "corpo" (esclude blink) per evitare stacking
+  const eventTimers  = useRef([]);
 
-  function clearAllTimers() {
-    timers.current.forEach(t => clearTimeout(t));
-    timers.current = [];
-  }
-
-  // ── Blink loop ──────────────────────────────────────────────────────────────
+  // ── Blink: indipendente dallo scheduler principale, leggero e non esclusivo ──
   useEffect(() => {
-    if (mood === "sleeping") return; // occhi già chiusi, non serve blink
+    if (intent === "sleepy") { setBlink(false); return; }
     let active = true;
+    const speed = intent === "playful" ? [1800,4000] : [2500,6000];
 
     function scheduleBlink() {
-      const delay = randBetween(2500, 6000);
+      const delay = speed[0] + Math.random()*(speed[1]-speed[0]);
       const t = setTimeout(() => {
         if (!active) return;
         setBlink(true);
-        const t2 = setTimeout(() => { if(active) setBlink(false); }, 140);
-        timers.current.push(t2);
+        const t2 = setTimeout(() => { if (active) setBlink(false); }, 140);
+        eventTimers.current.push(t2);
         scheduleBlink();
       }, delay);
-      timers.current.push(t);
+      eventTimers.current.push(t);
     }
     scheduleBlink();
-
-    return () => { active = false; clearAllTimers(); };
-  }, [mood]);
-
-  // ── Sguardo / inclinazione testa loop (idle, ogni 8-15s) ────────────────────
-  useEffect(() => {
-    if (mood === "sleeping") {
-      setLookOffset({ x:0, y:0 });
-      setHeadTilt(0);
-      return;
-    }
-    let active = true;
-
-    function scheduleIdleEvent() {
-      const delay = randBetween(8000, 15000);
-      const t = setTimeout(() => {
-        if (!active) return;
-        const choice = Math.floor(randBetween(0, 5));
-        if (choice === 0) {
-          // sguardo laterale
-          const x = randBetween(-2.5, 2.5);
-          const y = randBetween(-1, 1);
-          setLookOffset({ x, y });
-          const t2 = setTimeout(() => { if(active) setLookOffset({x:0,y:0}); }, 1200);
-          timers.current.push(t2);
-        } else if (choice === 1) {
-          // inclinazione testa
-          const tilt = randBetween(-3, 3);
-          setHeadTilt(tilt);
-          const t2 = setTimeout(() => { if(active) setHeadTilt(0); }, 1500);
-          timers.current.push(t2);
-        } else if (choice === 2) {
-          // colpo di coda extra
-          setTailFlick(true);
-          const t2 = setTimeout(() => { if(active) setTailFlick(false); }, 600);
-          timers.current.push(t2);
-        } else if (choice === 3) {
-          // movimento orecchie
-          setEarTwitch(true);
-          const t2 = setTimeout(() => { if(active) setEarTwitch(false); }, 500);
-          timers.current.push(t2);
-        } else {
-          // piccolo salto occasionale, solo se sveglia e non già impegnata
-          if (mood !== "sad") {
-            setHop(true);
-            const t2 = setTimeout(() => { if(active) setHop(false); }, 500);
-            timers.current.push(t2);
-          }
-        }
-        scheduleIdleEvent();
-      }, delay);
-      timers.current.push(t);
-    }
-    scheduleIdleEvent();
-
     return () => { active = false; };
-  }, [mood]);
+  }, [intent]);
 
-  useEffect(() => () => clearAllTimers(), []);
+  // ── Scheduler unico per gli eventi "corpo" (look/tilt/tail/ear/hop) ──────────
+  useEffect(() => {
+    const weights = INTENT_WEIGHTS[intent] || INTENT_WEIGHTS.idle;
+    if (Object.values(weights).every(w => w === 0)) return; // sleepy: nessun evento
+
+    let active = true;
+    const interval = setInterval(() => {
+      if (!active) return;
+      const now = Date.now();
+
+      // mutua esclusione: non avviare un nuovo evento corpo se uno è appena partito
+      if (now - lastAnyBody.current < GLOBAL_EVENT_GAP) return;
+
+      // candidati disponibili = peso > 0 E cooldown rispettato
+      const available = {};
+      for (const key of Object.keys(weights)) {
+        if (weights[key] > 0 && now - lastFired.current[key] >= COOLDOWNS[key]) {
+          available[key] = weights[key];
+        }
+      }
+      const chosen = pickWeightedEvent(available);
+      if (!chosen) return;
+
+      // probabilità di "non fare nulla" comunque, per non essere troppo meccanici
+      if (Math.random() > 0.55) return;
+
+      lastFired.current[chosen] = now;
+      lastAnyBody.current = now;
+
+      if (chosen === "look") {
+        const x = (Math.random()*5-2.5), y = (Math.random()*2-1);
+        setLookOffset({ x, y });
+        const t = setTimeout(() => { if(active) setLookOffset({x:0,y:0}); }, DURATIONS.look);
+        eventTimers.current.push(t);
+      } else if (chosen === "tilt") {
+        const tilt = Math.random()*6-3;
+        setHeadTilt(tilt);
+        const t = setTimeout(() => { if(active) setHeadTilt(0); }, DURATIONS.tilt);
+        eventTimers.current.push(t);
+      } else if (chosen === "tailFlick") {
+        setTailFlick(true);
+        const t = setTimeout(() => { if(active) setTailFlick(false); }, DURATIONS.tailFlick);
+        eventTimers.current.push(t);
+      } else if (chosen === "earTwitch") {
+        setEarTwitch(true);
+        const t = setTimeout(() => { if(active) setEarTwitch(false); }, DURATIONS.earTwitch);
+        eventTimers.current.push(t);
+      } else if (chosen === "hop") {
+        setHop(true);
+        const t = setTimeout(() => { if(active) setHop(false); }, DURATIONS.hop);
+        eventTimers.current.push(t);
+      }
+    }, TICK_MS);
+
+    return () => { active = false; clearInterval(interval); };
+  }, [intent]);
+
+  // Reset pose quando si entra in sleepy, e cleanup generale allo smontaggio
+  useEffect(() => {
+    if (intent === "sleepy") {
+      setLookOffset({x:0,y:0}); setHeadTilt(0); setTailFlick(false); setEarTwitch(false); setHop(false);
+    }
+  }, [intent]);
+
+  useEffect(() => () => { eventTimers.current.forEach(t => clearTimeout(t)); }, []);
 
   return { blink, lookOffset, headTilt, tailFlick, earTwitch, hop };
 }
