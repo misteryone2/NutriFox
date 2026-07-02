@@ -22,18 +22,21 @@ export function getFoxStage(streak) {
   return                   { name:"Cucciolo",    color:"#F4845F", aura:false, scale:1.0  };
 }
 
-export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFedAt = null }) {
+export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFedAt = null, licking = false }) {
 
   // 1. Pose + visualMood derivati con la stessa funzione pura usata da useFoxBrain,
   //    così l'intent delle animazioni idle è SEMPRE coerente con la pose reale.
-  const { visualMood } = deriveVisualState({ mood, lastFedAt });
+  const { visualMood, hoursSinceLastFed } = deriveVisualState({ mood, lastFedAt });
   const intent = getAnimationIntent(visualMood);
+  // Bucket a 15 minuti: evita che l'effetto di rallentamento del blink si
+  // riarmi ad ogni singolo render (hoursSinceLastFed cambia in continuazione).
+  const hoursBucket = hoursSinceLastFed != null ? Math.round(hoursSinceLastFed*4)/4 : null;
 
   // 2. Micro-animazioni idle: scheduler unico, valori boolean/numerici
-  const { blink, lookOffset, headTilt, tailFlick, earTwitch, hop } = useFoxAnimations(intent);
+  const { blink, lookOffset, headTilt, tailFlick, earTwitch, hop, yawn, stretch } = useFoxAnimations(intent, hoursBucket);
 
   // 3. Tutte le derivazioni visive: un oggetto unico, nessuna logica inline qui
-  const brain = useFoxBrain({ mood, streak, lastFedAt, bounce, hop, earTwitch });
+  const brain = useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch });
 
   const { stage, poseTransform, bodyAnim, tailSpeed } = brain;
 
@@ -95,6 +98,8 @@ export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce =
           headTilt={headTilt}
           earAngle={brain.earAngle}
           tailSpeed={tailSpeed}
+          yawning={yawn}
+          licking={licking}
         />
       </div>
 
@@ -105,11 +110,13 @@ export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce =
         .fox-hop     { animation: foxHop     0.5s  cubic-bezier(.36,.07,.19,.97) both; }
         .fox-breathe { animation: foxBreathe 4.5s ease-in-out infinite; }
         .fox-drowsy  { animation: foxDrowsy  5.2s ease-in-out infinite; }
+        .fox-stretch { animation: foxStretch 0.9s cubic-bezier(.45,0,.55,1) both; }
         .fox-sad     { animation: foxSad     4s   ease-in-out infinite; }
         .fox-excited { animation: foxExcited 0.85s ease-in-out infinite; }
 
         .fox-torso-group { animation: torsoBreathe 3.6s ease-in-out infinite; }
         .fox-head-group  { transition: transform 0.5s cubic-bezier(.34,1.4,.64,1); }
+        .fox-tongue      { transform-origin: 49px 66px; animation: foxLick 0.9s ease-in-out 2; }
 
         @keyframes foxIdle    { 0%,100%{ transform:translateY(0); }       50%{ transform:translateY(-5px); } }
         @keyframes foxBounce  { 0%{transform:scale(1) translateY(0);} 20%{transform:scale(1.08,.93) translateY(5px);} 45%{transform:scale(.94,1.06) translateY(-13px);} 65%{transform:scale(1.04,.97) translateY(3px);} 82%{transform:scale(.98,1.02) translateY(-4px);} 100%{transform:scale(1) translateY(0);} }
@@ -117,6 +124,8 @@ export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce =
         @keyframes foxHop     { 0%{transform:scale(1) translateY(0);} 35%{transform:scale(1.04,.96) translateY(-10px);} 70%{transform:scale(.98,1.02) translateY(2px);} 100%{transform:scale(1) translateY(0);} }
         @keyframes foxBreathe { 0%,100%{ transform:scale(1); }            50%{ transform:scale(1.02) translateY(-2px); } }
         @keyframes foxDrowsy  { 0%,100%{ transform:translateY(0) scale(1); } 50%{ transform:translateY(3px) scale(1.008,0.99); } }
+        @keyframes foxStretch { 0%{transform:scale(1) translateY(0);} 40%{transform:scale(0.94,1.14) translateY(-6px);} 70%{transform:scale(1.06,0.92) translateY(2px);} 100%{transform:scale(1) translateY(0);} }
+        @keyframes foxLick    { 0%,100%{ transform:translateY(0) scaleY(1); } 50%{ transform:translateY(3px) scaleY(1.3); } }
         @keyframes foxSad     { 0%,100%{ transform:translateY(0) rotate(0deg); }  50%{ transform:translateY(5px) rotate(-1deg); } }
         @keyframes foxExcited { 0%,100%{ transform:translateY(0) scale(1); }      30%{ transform:translateY(-7px) scale(1.03); } 70%{ transform:translateY(-3px) scale(1.01); } }
         @keyframes torsoBreathe { 0%,100%{ transform:scaleY(1); } 50%{ transform:scaleY(1.015); } }
