@@ -8,6 +8,14 @@ import { getAnimationIntent } from "./FoxAnimations";
 // OUTPUT: { brain } — oggetto unico con tutto il necessario per Fox.jsx e FoxSVG
 //
 // Nessun useState, nessun timer: solo calcoli derivati da props.
+//
+// v1.3.2: prima la pose (awake/sitting/lying/asleep) veniva calcolata qui dentro
+// ma l'intent delle animazioni idle veniva calcolato a parte in Fox.jsx a partire
+// dal mood grezzo — risultato: una volpe addormentata da ore continuava a fare
+// sguardi/salti da sveglia, e "mood sleeping" (occhi chiusi) non veniva mai
+// prodotto perché computeFoxMood non lo restituisce mai. deriveVisualState()
+// unifica questo calcolo in un unico posto puro, usato sia da Fox.jsx (per
+// scegliere l'intent prima di chiamare gli hook) sia da useFoxBrain.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Stage in base alla streak
@@ -16,15 +24,6 @@ function deriveStage(streak) {
   if (streak >= 14) return { name:"Adulta",      color:"#A78BFA", aura:false, scale:1.06 };
   if (streak >= 7)  return { name:"Giovane",     color:"#6FCF97", aura:false, scale:1.02 };
   return                   { name:"Cucciolo",    color:"#F4845F", aura:false, scale:1.0  };
-}
-
-// Pose fisica in base a ore dall'ultimo pasto
-function derivePose(hoursSinceLastFed) {
-  if (hoursSinceLastFed == null) return "awake";
-  if (hoursSinceLastFed >= 6)   return "asleep";
-  if (hoursSinceLastFed >= 4)   return "lying";
-  if (hoursSinceLastFed >= 2)   return "sitting";
-  return "awake";
 }
 
 // Trasformazioni CSS corrispondenti alla pose
@@ -52,6 +51,8 @@ const MOOD_EXPR = {
   excited: { bY:-6, bCurve:9,  mouth:"M 43 64 Q 52 76 61 64", eH:1.12, open:true,  cheeksUp:true,  mouthFill:true,  mouthFillOpacity:0.22, sparkleBrows:true,  earMood:"up",      sleepy:false },
   neutral: { bY:0,  bCurve:1,  mouth:"M 46 67 Q 52 70 58 67", eH:1.0,  open:true,  cheeksUp:false, mouthFill:false, mouthFillOpacity:0,    sparkleBrows:false, earMood:"up",      sleepy:false },
   sad:     { bY:4,  bCurve:-5, mouth:"M 46 71 Q 52 65 58 71", eH:0.88, open:true,  cheeksUp:false, mouthFill:false, mouthFillOpacity:0,    sparkleBrows:false, earMood:"down",    sleepy:false },
+  // drowsy: pose "lying" (2-4h senza mangiare) — occhi socchiusi, non ancora chiusi del tutto
+  drowsy:  { bY:2,  bCurve:-1, mouth:"M 46 68 Q 52 70 58 68", eH:0.32, open:true,  cheeksUp:false, mouthFill:false, mouthFillOpacity:0,    sparkleBrows:false, earMood:"down",    sleepy:false },
   sleeping:{ bY:0,  bCurve:0,  mouth:"M 46 67 Q 52 70 58 67", eH:0,    open:false, cheeksUp:false, mouthFill:false, mouthFillOpacity:0,    sparkleBrows:false, earMood:"relaxed", sleepy:true  },
 };
 
@@ -61,17 +62,40 @@ const EAR_ANGLES = {
   down:    { left:14,  right:-14 },
 };
 
+// Pose fisica pura, senza hook — usata sia da deriveVisualState che da useFoxBrain
+function poseFromHours(hoursSinceLastFed) {
+  if (hoursSinceLastFed == null) return "awake";
+  if (hoursSinceLastFed >= 6)   return "asleep";
+  if (hoursSinceLastFed >= 4)   return "lying";
+  if (hoursSinceLastFed >= 2)   return "sitting";
+  return "awake";
+}
+
+// ─── FUNZIONE PURA CONDIVISA ──────────────────────────────────────────────────
+// Combina il mood "emotivo" (calcolato in App.jsx da hunger/energy/happiness)
+// con la pose fisica (calcolata da quanto tempo è passato dall'ultimo pasto) in
+// un unico "visualMood" coerente: se il corpo è addormentato, l'espressione lo
+// segue sempre, indipendentemente da cosa direbbe il mood emotivo da solo.
+// Nessun hook qui dentro: può essere chiamata anche fuori da un componente React.
+export function deriveVisualState({ mood, lastFedAt }) {
+  const hoursSinceLastFed = lastFedAt ? (Date.now() - lastFedAt) / 3600000 : null;
+  const pose = poseFromHours(hoursSinceLastFed);
+  const visualMood = pose === "asleep" ? "sleeping"
+    : pose === "lying"                 ? "drowsy"
+    : mood;
+  return { pose, visualMood, hoursSinceLastFed };
+}
+
 // ─── HOOK PRINCIPALE ─────────────────────────────────────────────────────────
 export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, earTwitch }) {
   return useMemo(() => {
-    const stage              = deriveStage(streak);
-    const colors             = deriveColors(streak);
-    const hoursSinceLastFed  = lastFedAt ? (Date.now() - lastFedAt) / 3600000 : null;
-    const pose               = mood === "sleeping" ? "asleep" : derivePose(hoursSinceLastFed);
-    const poseTransform      = poseToTransform(pose);
-    const intent             = getAnimationIntent(mood);
-    const ex                 = MOOD_EXPR[mood] || MOOD_EXPR.neutral;
-    const baseEarAngle       = EAR_ANGLES[ex.earMood] || EAR_ANGLES.up;
+    const stage               = deriveStage(streak);
+    const colors               = deriveColors(streak);
+    const { pose, visualMood, hoursSinceLastFed } = deriveVisualState({ mood, lastFedAt });
+    const poseTransform       = poseToTransform(pose);
+    const intent              = getAnimationIntent(visualMood);
+    const ex                  = MOOD_EXPR[visualMood] || MOOD_EXPR.neutral;
+    const baseEarAngle        = EAR_ANGLES[ex.earMood] || EAR_ANGLES.up;
 
     // Le orecchie si abbassano in pose non-awake, reagiscono anche all'earTwitch
     const earAngle = pose !== "awake"
@@ -80,17 +104,18 @@ export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, earTwitch })
         ? { left: baseEarAngle.left + 8, right: baseEarAngle.right }
         : baseEarAngle;
 
-    // Animazione corpo
-    const bodyAnim = bounce    ? "fox-bounce"
-      : hop                    ? "fox-hop"
-      : pose === "asleep"      ? "fox-breathe"
-      : mood === "sleeping"    ? "fox-breathe"
-      : mood === "sad"         ? "fox-sad"
-      : mood === "excited"     ? "fox-excited"
+    // Animazione corpo — ora segue la pose reale, non solo il mood emotivo
+    const bodyAnim = bounce       ? "fox-bounce"
+      : hop                       ? "fox-hop"
+      : pose === "asleep"         ? "fox-breathe"
+      : pose === "lying"          ? "fox-drowsy"
+      : visualMood === "sad"      ? "fox-sad"
+      : visualMood === "excited"  ? "fox-excited"
       : "fox-idle";
 
     // Velocità coda: dipende da intent
     const tailSpeed = intent === "playful" ? "1.8s"
+      : intent === "drowsy"                ? "5s"
       : intent === "sleepy"                ? "6s"
       : "3.5s";
 
@@ -100,7 +125,8 @@ export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, earTwitch })
       // per il wrapper in Fox.jsx
       poseTransform, bodyAnim, tailSpeed,
       // metadati
-      pose, intent, hoursSinceLastFed,
+      pose, visualMood, intent, hoursSinceLastFed,
     };
   }, [mood, streak, lastFedAt, bounce, hop, earTwitch]);
 }
+
