@@ -5,9 +5,10 @@
 
 export default function FoxSVG({
   ex, colors, streak, legendary, blink, lookOffset, headTilt, earAngle, tailSpeed = "3.5s",
+  yawning = false, licking = false,
 }) {
   const { sw, swD, pt } = colors;
-  const eyesClosed = ex.open === false || blink;
+  const eyesClosed = ex.open === false || blink || yawning;
 
   return (
     <svg width="100%" height="100%" viewBox="0 0 104 123"
@@ -197,9 +198,21 @@ export default function FoxSVG({
         <ellipse cx="48" cy="52" rx="2" ry="1.3" fill="white" opacity="0.3"/>
         <path d="M 49 54 L 49 59" stroke="#C8A882" strokeWidth="1.5" strokeLinecap="round" opacity="0.55"/>
 
-        {/* BOCCA */}
-        <path d={ex.mouth} stroke="#5C3018" strokeWidth="2.2" fill="none" strokeLinecap="round"/>
-        {ex.mouthFill && <path d={ex.mouth} fill="#FF8FA3" opacity={ex.mouthFillOpacity}/>}
+        {/* BOCCA — durante lo sbadiglio (v1.4) la forma normale è sostituita da
+            un'ovale ben aperta, indipendente dal mood corrente */}
+        {yawning ? (
+          <ellipse cx="49" cy="65" rx="7" ry="9" fill="#5C1A1A"/>
+        ) : (
+          <>
+            <path d={ex.mouth} stroke="#5C3018" strokeWidth="2.2" fill="none" strokeLinecap="round"/>
+            {ex.mouthFill && <path d={ex.mouth} fill="#FF8FA3" opacity={ex.mouthFillOpacity}/>}
+          </>
+        )}
+
+        {/* LINGUA — si lecca i baffi subito dopo aver mangiato (v1.4) */}
+        {licking && (
+          <ellipse className="fox-tongue" cx="49" cy="68" rx="4.5" ry="3" fill="#FF8FA3" opacity="0.9"/>
+        )}
 
         {/* GUANCE SOLLEVATE (happy/excited) */}
         {ex.cheeksUp && (
