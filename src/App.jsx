@@ -48,6 +48,7 @@ const FOOD_DB = {
     { name:"Spezzatino di manzo",       kcal:210, p:24, c:4,  f:10,  type:"protein" },
     { name:"Polpette al sugo (3)",      kcal:280, p:18, c:12, f:17,  type:"protein" },
     { name:"Pollo alla cacciatora",     kcal:260, p:28, c:6,  f:14,  type:"protein" },
+    { name:"Tonno alla griglia",        kcal:200, p:34, c:0,  f:7,   type:"protein" },
   ],
   "Uova e Latticini": [
     { name:"Uovo intero",               kcal:78,  p:6,  c:0.6,f:5,   type:"protein" },
@@ -101,6 +102,7 @@ const FOOD_DB = {
     { name:"Avena (porridge 200ml)",    kcal:150, p:5,  c:27, f:3,   type:"carb"    },
     { name:"Crackers (5 pz)",           kcal:110, p:2.5,c:18, f:3.5, type:"carb"    },
     { name:"Pasta alla carbonara",      kcal:460, p:18, c:55, f:18,  type:"carb"    },
+    { name:"Risotto ai funghi",         kcal:340, p:8,  c:58, f:9,   type:"carb"    },
   ],
   "Verdure e Legumi": [
     { name:"Insalata mista",            kcal:15,  p:1,  c:2,  f:0.2, type:"light"   },
@@ -134,6 +136,7 @@ const FOOD_DB = {
     { name:"Zuppa di lenticchie",       kcal:140, p:9,  c:22, f:2,   type:"protein" },
     { name:"Caponata (100g)",           kcal:90,  p:1.5,c:9,  f:5,   type:"light"   },
     { name:"Melanzane a funghetto",     kcal:90,  p:2,  c:8,  f:6,   type:"light"   },
+    { name:"Zucca al forno (150g)",     kcal:65,  p:1.5,c:14, f:0.3, type:"light"   },
   ],
   "Frutta": [
     { name:"Mela",                      kcal:72,  p:0.4,c:19, f:0.2, type:"light"   },
@@ -239,6 +242,7 @@ const FOOD_DB = {
     { name:"Tiramisù (porzione)",       kcal:380, p:7,  c:38, f:22,  type:"fat"     },
     { name:"Panna cotta",               kcal:220, p:3,  c:25, f:12,  type:"fat"     },
     { name:"Pancake (2)",               kcal:220, p:6,  c:34, f:7,   type:"carb"    },
+    { name:"Porridge alla frutta",      kcal:230, p:7,  c:38, f:5,   type:"carb"    },
   ],
   "Bevande": [
     { name:"Acqua",                     kcal:0,   p:0,  c:0,  f:0,   type:"light"   },
@@ -274,12 +278,27 @@ function save(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch{} }
 function todayKey(){ return new Date().toISOString().split("T")[0]; }
 
 // ─── FOX STATE LOGIC ─────────────────────────────────────────────────────────
-function computeFoxMood(hunger, energy, happiness) {
-  if (hunger > 75 || happiness < 25) return "sad";
-  if (hunger < 25 && energy > 60 && happiness > 70) return "excited";
-  if (hunger < 40 && energy > 45 && happiness > 50) return "happy";
-  if (energy < 25) return "sad";
-  return "neutral";
+// v1.4: il mood non è più un valore che scatta da uno stato all'altro in un
+// colpo solo. MOOD_ORDER definisce una scala continua; ad ogni aggiornamento
+// dello stato (decay periodico o pasto) calcoliamo il mood "target" in base
+// alle statistiche attuali, ma il mood effettivamente mostrato si sposta di un
+// solo gradino per volta verso il target — così la volpe passa sempre da
+// "triste" a "neutra" a "serena" prima di arrivare a "felice", mai di scatto.
+const MOOD_ORDER = ["sad", "neutral", "content", "happy", "excited"];
+
+function computeTargetMoodIndex(hunger, energy, happiness) {
+  if (hunger > 75 || happiness < 25 || energy < 25) return 0; // sad
+  if (hunger < 25 && energy > 60 && happiness > 70) return 4; // excited
+  if (hunger < 40 && energy > 45 && happiness > 55) return 3; // happy
+  if (hunger < 55 && energy > 35 && happiness > 40) return 2; // content
+  return 1; // neutral
+}
+
+// Sposta l'indice corrente di un solo passo verso il target (mai di scatto)
+function stepMoodIndex(currentIndex, targetIndex) {
+  if (currentIndex == null) return targetIndex;
+  if (currentIndex === targetIndex) return currentIndex;
+  return currentIndex + Math.sign(targetIndex - currentIndex);
 }
 
 // Stima qualità pasto 0-1 basata su bilanciamento macro (non solo calorie)
@@ -323,11 +342,98 @@ function pickReaction(type, foodName) {
   return foodName ? msg.replace("{food}", foodName) : msg.replace("{food} ","").replace("{food}","Buono");
 }
 
+// ─── MEMORIA & ROUTINE (v1.4) ────────────────────────────────────────────────
+// La volpe non reagisce più solo al singolo pasto: guarda anche a cosa è
+// successo nei giorni recenti, per farla sentire un compagno che "ricorda"
+// davvero, non uno script che pesca frasi a caso.
+
+// Quante volte un dato alimento è stato mangiato negli ultimi 7 giorni
+// (oggi incluso). Usata per frasi tipo "È il terzo yogurt questa settimana!".
+function getFoodMemoryCount(dailyLog, foodName) {
+  let count = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(); d.setDate(d.getDate()-i);
+    const key = d.toISOString().split("T")[0];
+    const meals = dailyLog[key]?.meals || [];
+    count += meals.filter(m => m.name === foodName).length;
+  }
+  return count;
+}
+
+// Ordinale italiano semplice per i numeri più comuni in questo contesto
+function ordinalIt(n) {
+  const words = { 1:"il primo", 2:"il secondo", 3:"il terzo", 4:"il quarto", 5:"il quinto", 6:"il sesto", 7:"il settimo" };
+  return words[n] || `il numero ${n}`;
+}
+
+// Routine di un tipo di pasto: media oraria negli ultimi 14 giorni (esclusi
+// oggi), solo se ci sono abbastanza dati per parlare davvero di "abitudine".
+function getMealRoutine(dailyLog, mealType) {
+  const hours = [];
+  for (let i = 1; i <= 14; i++) {
+    const d = new Date(); d.setDate(d.getDate()-i);
+    const key = d.toISOString().split("T")[0];
+    const meals = dailyLog[key]?.meals || [];
+    meals.filter(m => m.meal === mealType).forEach(m => {
+      const h = parseInt((m.time||"").split(":")[0], 10);
+      if (!isNaN(h)) hours.push(h);
+    });
+  }
+  if (hours.length < 3) return null;
+  const avgHour = Math.round(hours.reduce((a,b)=>a+b,0)/hours.length);
+  return { avgHour, samples: hours.length };
+}
+
+// Selezione pesata generica: array di { weight, ...resto }
+function weightedPick(candidates) {
+  const total = candidates.reduce((s,c)=>s+c.weight, 0);
+  let r = Math.random()*total;
+  for (const c of candidates) {
+    if (r < c.weight) return c;
+    r -= c.weight;
+  }
+  return candidates[candidates.length-1];
+}
+
+// Compone la reazione al pasto: se c'è un fatto reale interessante (memoria
+// settimanale, routine oraria, attesa lunga) ha buone probabilità di essere
+// scelto al posto della frase generica — così i dialoghi cambiano davvero in
+// base al contesto e non solo per pescaggio casuale dallo stesso elenco fisso.
+function composeMealReaction({ reactionType, foodName, dailyLog, mealType, waitedLong }) {
+  const candidates = [{ weight:6, text: pickReaction(reactionType, foodName) }]; // sempre disponibile
+
+  if (waitedLong) {
+    candidates.push({ weight:5, text: pickReaction("relieved", foodName) });
+  }
+
+  const memoryCount = getFoodMemoryCount(dailyLog, foodName);
+  if (memoryCount >= 3) {
+    candidates.push({ weight:4, text: `È ${ordinalIt(memoryCount)} ${foodName} questa settimana!` });
+  }
+
+  const routine = getMealRoutine(dailyLog, mealType);
+  if (routine) {
+    const currentHour = new Date().getHours();
+    const diff = Math.abs(currentHour - routine.avgHour);
+    if (diff <= 1) {
+      candidates.push({ weight:3, text: `Puntuale come sempre, ${mealType.toLowerCase()} verso le ${routine.avgHour}!` });
+    } else if (diff >= 3) {
+      candidates.push({ weight:2, text: `Oggi ${mealType.toLowerCase()} un po' fuori dai tuoi orari soliti, va benissimo comunque!` });
+    }
+  }
+
+  return weightedPick(candidates).text;
+}
+
 // ─── DIALOGHI CONTESTUALI ────────────────────────────────────────────────────
 // Frasi affettuose e mai giudicanti, scelte in base alla situazione reale della giornata.
-// Priorità: bisogni fisici > memoria pasti di oggi > stato emotivo generico.
+// Priorità: bisogni fisici > memoria pasti di oggi > memoria settimanale > routine > stato emotivo generico.
+// v1.4: aggiunta memoria settimanale (alimenti ricorrenti) e riconoscimento
+// delle abitudini (orario tipico dei pasti). Nessun Math.random() qui dentro
+// di proposito: la caption deve restare stabile tra un render e l'altro finché
+// lo stato reale non cambia davvero.
 function getContextualMessage(ctx) {
-  const { hoursSinceLastFed, water, targetWater, totalP, mealsCount, totalKcal, gKcal, mood, foxName } = ctx;
+  const { hoursSinceLastFed, water, targetWater, totalP, mealsCount, totalKcal, gKcal, mood, foxName, dailyLog, todayMeals } = ctx;
 
   if (hoursSinceLastFed != null && hoursSinceLastFed >= 5) {
     return "È da tanto che non mangiamo... quando vuoi io ci sono!";
@@ -341,17 +447,34 @@ function getContextualMessage(ctx) {
   if (mealsCount === 3) {
     return "Questo è il terzo pasto di oggi, stiamo andando alla grande!";
   }
+  // Memoria settimanale: un alimento di oggi che ricorre spesso questa settimana
+  if (dailyLog && todayMeals && todayMeals.length > 0) {
+    const frequent = todayMeals
+      .map(m => ({ name:m.name, count:getFoodMemoryCount(dailyLog, m.name) }))
+      .find(f => f.count >= 3);
+    if (frequent) {
+      return `È ${ordinalIt(frequent.count)} ${frequent.name} questa settimana — ti piace davvero! 🦊`;
+    }
+  }
   if (water >= targetWater && mealsCount > 0) {
     return "Hai già bevuto abbastanza, bravissimo!";
   }
   if (totalKcal > 0 && totalKcal <= gKcal && mealsCount >= 2) {
     return "Stai rispettando il tuo obiettivo, sono fiera di te!";
   }
+  // Routine: prima del primo pasto, se riconosciamo un'abitudine di colazione
+  if (mealsCount === 0 && dailyLog && new Date().getHours() < 11) {
+    const routine = getMealRoutine(dailyLog, "Colazione");
+    if (routine) return `Di solito fai colazione verso le ${routine.avgHour}, ti aspetto! 🦊`;
+  }
   if (mood === "excited") {
     return "Mi sento davvero bene oggi! ✨";
   }
   if (mood === "happy") {
     return "Che bella giornata insieme!";
+  }
+  if (mood === "content") {
+    return "Tutto tranquillo, mi sento serena.";
   }
   if (mood === "sad") {
     return "Un po' giù di energie... ma so che ci riprendiamo!";
@@ -419,12 +542,13 @@ export default function NutriFox() {
   const [aiLoading, setAiLoading] = useState(false);
   const chatEndRef = useRef(null);
 
-  // Fox state — esteso con happiness, health, lastFedAt (campi originali invariati)
-  const [foxState,  setFoxState]  = useState(()=>load("nf_foxstate",{hunger:50,energy:50,happiness:70,health:90,lastFedAt:null}));
+  // Fox state — esteso con happiness, health, lastFedAt, moodIndex (stati intermedi v1.4)
+  const [foxState,  setFoxState]  = useState(()=>load("nf_foxstate",{hunger:50,energy:50,happiness:70,health:90,lastFedAt:null,moodIndex:1}));
   const [bounce,    setBounce]    = useState(false);
   const [feedLabel, setFeedLabel] = useState("");
   const [reaction,  setReaction]  = useState(null); // {type, message} — popup temporaneo 2-3s
   const [reward,    setReward]    = useState(null); // {icon} — effetto ricompensa <2s (streak/acqua/obiettivo/evoluzione)
+  const [licking,   setLicking]   = useState(false); // v1.4: si lecca i baffi subito dopo il pasto
   const [celebratedToday, setCelebratedToday] = useState(()=>load("nf_celebrated_"+todayKey(),{}));
   const [tempName,  setTempName]  = useState("Foxy");
   const [tempGoal,  setTempGoal]  = useState("mangiare_meglio");
@@ -457,6 +581,8 @@ export default function NutriFox() {
 
   // Decay system leggero: ogni minuto hunger sale, energy scende.
   // Se hunger troppo alto, happiness scende di conseguenza. Health segue happiness nel tempo.
+  // v1.4: moodIndex avanza di un solo gradino per tick verso il mood "target" —
+  // è qui che si vede davvero la transizione graduale, non solo al momento del pasto.
   useEffect(()=>{
     const iv = setInterval(()=>{
       setFoxState(prev=>{
@@ -464,7 +590,9 @@ export default function NutriFox() {
         const energy    = Math.max(0, prev.energy-1);
         const happiness = hunger > 70 ? Math.max(0, (prev.happiness??70)-2) : (prev.happiness??70);
         const health    = happiness < 30 ? Math.max(0, (prev.health??90)-1) : (prev.health??90);
-        return { ...prev, hunger, energy, happiness, health };
+        const target     = computeTargetMoodIndex(hunger, energy, happiness);
+        const moodIndex  = stepMoodIndex(prev.moodIndex, target);
+        return { ...prev, hunger, energy, happiness, health, moodIndex };
       });
     }, 60000); // ogni minuto
     return ()=>clearInterval(iv);
@@ -474,7 +602,7 @@ export default function NutriFox() {
   const todayData= dailyLog[today]||{meals:[]};
   const streak   = getStreak(dailyLog);
   const stage    = getFoxStage(streak);
-  const mood     = computeFoxMood(foxState.hunger, foxState.energy, foxState.happiness??70);
+  const mood     = MOOD_ORDER[foxState.moodIndex ?? computeTargetMoodIndex(foxState.hunger, foxState.energy, foxState.happiness??70)];
 
   function goalKcal(){
     const bmr=calcBMR(Number(profile.weight),Number(profile.height),Number(profile.age),profile.sex);
@@ -498,7 +626,7 @@ export default function NutriFox() {
 
   const contextualMessage = getContextualMessage({
     hoursSinceLastFed, water, targetWater, totalP, mealsCount:todayData.meals.length,
-    totalKcal, gKcal, mood, foxName,
+    totalKcal, gKcal, mood, foxName, dailyLog, todayMeals:todayData.meals,
   });
 
   // Effetti di ricompensa (punto 5): si attivano una sola volta per evento al giorno, niente loop di re-render.
@@ -596,8 +724,7 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
   }
 
   // Reaction popup: appare sopra la volpe per 2.5s dopo ogni pasto
-  function triggerReaction(type, foodName){
-    const message = pickReaction(type, foodName);
+  function triggerReaction(type, message){
     setReaction({ type, message });
     setTimeout(()=>setReaction(null), 2500);
   }
@@ -608,15 +735,24 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
     // "relieved" invece del tipo standard legato al macro — più coerente e viva
     const waitedLong = hoursSinceLastFed != null && hoursSinceLastFed >= 5;
     const reactionType = waitedLong ? "relieved" : effect.reaction;
-    setFoxState(prev=>({
-      ...prev,
-      hunger:Math.max(0,prev.hunger+effect.hungerDelta),
-      energy:Math.min(100,prev.energy+effect.energyDelta),
-      happiness:Math.min(100,(prev.happiness??70)+effect.happinessDelta),
-      lastFedAt:Date.now(),
-    }));
+    // v1.4: il messaggio non è più un pescaggio semplice — pesca tra la frase
+    // generica e i fatti reali (memoria settimanale, routine oraria) se disponibili
+    const message = composeMealReaction({
+      reactionType, foodName:food.name, dailyLog, mealType, waitedLong,
+    });
+    setFoxState(prev=>{
+      const hunger    = Math.max(0,prev.hunger+effect.hungerDelta);
+      const energy    = Math.min(100,prev.energy+effect.energyDelta);
+      const happiness = Math.min(100,(prev.happiness??70)+effect.happinessDelta);
+      const target    = computeTargetMoodIndex(hunger, energy, happiness);
+      const moodIndex = stepMoodIndex(prev.moodIndex, target);
+      return { ...prev, hunger, energy, happiness, lastFedAt:Date.now(), moodIndex };
+    });
     triggerBounce(effect.label);
-    triggerReaction(reactionType, food.name);
+    triggerReaction(reactionType, message);
+    // v1.4: piccola azione autonoma — la volpe si lecca i baffi subito dopo aver mangiato
+    setLicking(true);
+    setTimeout(()=>setLicking(false), 900);
     const entry={...food,meal:mealType,time:new Date().toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"})};
     setDailyLog(prev=>({...prev,[today]:{meals:[...(prev[today]?.meals||[]),entry]}}));
     setRecentFoods(prev=>[food,...prev.filter(f=>f.name!==food.name)].slice(0,20));
@@ -974,8 +1110,8 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
   );
 
   // ── HOME ──────────────────────────────────────────────────────────────────────
-  const moodLabels={happy:"Soddisfatta",excited:"Euforica!",neutral:"Tranquilla",sad:"Ho fame..."};
-  const moodEmoji ={happy:"😊",excited:"🤩",neutral:"😌",sad:"😟"};
+  const moodLabels={happy:"Soddisfatta",excited:"Euforica!",content:"Serena",neutral:"Tranquilla",sad:"Ho fame..."};
+  const moodEmoji ={happy:"😊",excited:"🤩",content:"🙂",neutral:"😌",sad:"😟"};
   const hungerColor=foxState.hunger>70?C.accent:foxState.hunger>40?C.gold:C.green;
   const energyColor=foxState.energy>60?C.green:foxState.energy>30?C.gold:C.accent;
   const happinessColor=(foxState.happiness??70)>60?C.green:(foxState.happiness??70)>30?C.gold:C.accent;
@@ -1012,7 +1148,7 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
 
         {/* Fox + reaction popup + feed label */}
         <div style={{position:"relative",display:"inline-block"}}>
-          <Fox mood={mood} streak={streak} size={160} bounce={bounce} lastFedAt={foxState.lastFedAt}/>
+          <Fox mood={mood} streak={streak} size={160} bounce={bounce} lastFedAt={foxState.lastFedAt} licking={licking}/>
           {feedLabel&&(
             <div style={{position:"absolute",top:-10,left:"50%",transform:"translateX(-50%)",background:`linear-gradient(135deg,${C.accent},#E8553F)`,borderRadius:20,padding:"5px 14px",fontSize:13,fontWeight:700,color:"white",whiteSpace:"nowrap",animation:"floatUp 2s ease-out forwards",boxShadow:`0 4px 16px ${C.accent}55`}}>
               {feedLabel}
