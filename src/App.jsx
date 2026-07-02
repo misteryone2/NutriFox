@@ -47,6 +47,7 @@ const FOOD_DB = {
     { name:"Cotoletta alla bolognese",  kcal:380, p:28, c:12, f:24,  type:"protein" },
     { name:"Spezzatino di manzo",       kcal:210, p:24, c:4,  f:10,  type:"protein" },
     { name:"Polpette al sugo (3)",      kcal:280, p:18, c:12, f:17,  type:"protein" },
+    { name:"Pollo alla cacciatora",     kcal:260, p:28, c:6,  f:14,  type:"protein" },
   ],
   "Uova e Latticini": [
     { name:"Uovo intero",               kcal:78,  p:6,  c:0.6,f:5,   type:"protein" },
@@ -99,6 +100,7 @@ const FOOD_DB = {
     { name:"Quinoa (100g cotta)",       kcal:120, p:4.4,c:22, f:1.9, type:"carb"    },
     { name:"Avena (porridge 200ml)",    kcal:150, p:5,  c:27, f:3,   type:"carb"    },
     { name:"Crackers (5 pz)",           kcal:110, p:2.5,c:18, f:3.5, type:"carb"    },
+    { name:"Pasta alla carbonara",      kcal:460, p:18, c:55, f:18,  type:"carb"    },
   ],
   "Verdure e Legumi": [
     { name:"Insalata mista",            kcal:15,  p:1,  c:2,  f:0.2, type:"light"   },
@@ -131,6 +133,7 @@ const FOOD_DB = {
     { name:"Erbazzone",                 kcal:220, p:8,  c:22, f:11,  type:"fat"     },
     { name:"Zuppa di lenticchie",       kcal:140, p:9,  c:22, f:2,   type:"protein" },
     { name:"Caponata (100g)",           kcal:90,  p:1.5,c:9,  f:5,   type:"light"   },
+    { name:"Melanzane a funghetto",     kcal:90,  p:2,  c:8,  f:6,   type:"light"   },
   ],
   "Frutta": [
     { name:"Mela",                      kcal:72,  p:0.4,c:19, f:0.2, type:"light"   },
@@ -153,6 +156,7 @@ const FOOD_DB = {
     { name:"Avocado",                   kcal:160, p:2,  c:9,  f:15,  type:"fat"     },
     { name:"Frutto della passione (2)", kcal:48,  p:2,  c:11, f:0.4, type:"light"   },
     { name:"Fico (2 pz)",               kcal:74,  p:0.8,c:19, f:0.3, type:"light"   },
+    { name:"Cocco (30g)",               kcal:106, p:1,  c:4,  f:10,  type:"fat"     },
   ],
   "Sughi e Condimenti": [
     { name:"Sugo al pomodoro (100g)",   kcal:45,  p:1.5,c:8,  f:1.2, type:"light"   },
@@ -168,6 +172,7 @@ const FOOD_DB = {
     { name:"Hummus (50g)",              kcal:115, p:4,  c:9,  f:7,   type:"protein" },
     { name:"Guacamole (50g)",           kcal:80,  p:1,  c:4,  f:7,   type:"fat"     },
     { name:"Tzatziki (50g)",            kcal:55,  p:3,  c:3,  f:3,   type:"light"   },
+    { name:"Salsa BBQ (30g)",           kcal:60,  p:0.3,c:14, f:0.2, type:"carb"    },
   ],
   "Surgelati": [
     { name:"Bastoncini di pesce (2)",   kcal:160, p:8,  c:16, f:7,   type:"carb"    },
@@ -203,6 +208,7 @@ const FOOD_DB = {
     { name:"Kebab in pita",             kcal:480, p:24, c:48, f:20,  type:"carb"    },
     { name:"Sushi misto (8 pz)",        kcal:320, p:14, c:52, f:6,   type:"carb"    },
     { name:"Bowl di riso con salmone",  kcal:420, p:28, c:45, f:12,  type:"protein" },
+    { name:"Poke bowl salmone",         kcal:420, p:26, c:48, f:14,  type:"protein" },
   ],
   "Colazione e Snack": [
     { name:"Caffe espresso",            kcal:2,   p:0.1,c:0.3,f:0,   type:"light"   },
@@ -232,6 +238,7 @@ const FOOD_DB = {
     { name:"Torta di mele (fetta)",     kcal:280, p:4,  c:42, f:11,  type:"carb"    },
     { name:"Tiramisù (porzione)",       kcal:380, p:7,  c:38, f:22,  type:"fat"     },
     { name:"Panna cotta",               kcal:220, p:3,  c:25, f:12,  type:"fat"     },
+    { name:"Pancake (2)",               kcal:220, p:6,  c:34, f:7,   type:"carb"    },
   ],
   "Bevande": [
     { name:"Acqua",                     kcal:0,   p:0,  c:0,  f:0,   type:"light"   },
@@ -253,6 +260,7 @@ const FOOD_DB = {
     { name:"Latte di soia (200ml)",     kcal:80,  p:6,  c:7,  f:3,   type:"protein" },
     { name:"Latte di mandorla (200ml)", kcal:50,  p:1,  c:7,  f:2,   type:"light"   },
     { name:"Protein shake (300ml)",     kcal:180, p:30, c:8,  f:3,   type:"protein" },
+    { name:"Chinotto (330ml)",          kcal:120, p:0,  c:30, f:0,   type:"carb"    },
   ],
 };
 
@@ -298,16 +306,21 @@ function getFoodEffect(food) {
   }
 }
 
-// Messaggi reazione mostrati nel popup dopo il pasto
+// Messaggi reazione mostrati nel popup dopo il pasto.
+// v1.3.2: pool ampliati (meno ripetizioni) e alcune varianti personalizzate col
+// nome dell'alimento tramite il segnaposto {food}. Aggiunta la reazione
+// "relieved", usata quando la volpe aspettava un pasto da parecchie ore.
 const REACTION_MESSAGES = {
-  happy:     ["Che buono!", "Mi piace!", "Delizioso!"],
-  energetic: ["Che carica!", "Sento l'energia!", "Forza pura!"],
-  neutral:   ["Mmh, ok.", "Va bene così.", "Non male."],
+  happy:     ["Che buono!", "Mi piace!", "Delizioso!", "{food}? Sì grazie!", "Che bontà questo {food}!", "Yum!", "Mi fa sempre piacere!"],
+  energetic: ["Che carica!", "Sento l'energia!", "Forza pura!", "{food} è proprio quello che ci voleva!", "Ora sì che si corre!", "Che sprint!"],
+  neutral:   ["Mmh, ok.", "Va bene così.", "Non male.", "Ci sta.", "Va giù bene."],
   sad:       ["Avrei voluto di meglio...", "Speravo in altro."],
+  relieved:  ["Finalmente! Che sollievo 😌", "Aspettavo proprio questo momento!", "Ah, ora va molto meglio.", "Grazie, ne avevo davvero bisogno.", "{food}, giusto in tempo!"],
 };
-function pickReaction(type) {
+function pickReaction(type, foodName) {
   const arr = REACTION_MESSAGES[type] || REACTION_MESSAGES.neutral;
-  return arr[Math.floor(Math.random()*arr.length)];
+  const msg = arr[Math.floor(Math.random()*arr.length)];
+  return foodName ? msg.replace("{food}", foodName) : msg.replace("{food} ","").replace("{food}","Buono");
 }
 
 // ─── DIALOGHI CONTESTUALI ────────────────────────────────────────────────────
@@ -583,14 +596,18 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
   }
 
   // Reaction popup: appare sopra la volpe per 2.5s dopo ogni pasto
-  function triggerReaction(type){
-    const message = pickReaction(type);
+  function triggerReaction(type, foodName){
+    const message = pickReaction(type, foodName);
     setReaction({ type, message });
     setTimeout(()=>setReaction(null), 2500);
   }
 
   function addFood(food){
     const effect=getFoodEffect(food);
+    // v1.3.2: se la volpe aspettava un pasto da tante ore, la reazione diventa
+    // "relieved" invece del tipo standard legato al macro — più coerente e viva
+    const waitedLong = hoursSinceLastFed != null && hoursSinceLastFed >= 5;
+    const reactionType = waitedLong ? "relieved" : effect.reaction;
     setFoxState(prev=>({
       ...prev,
       hunger:Math.max(0,prev.hunger+effect.hungerDelta),
@@ -599,7 +616,7 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
       lastFedAt:Date.now(),
     }));
     triggerBounce(effect.label);
-    triggerReaction(effect.reaction);
+    triggerReaction(reactionType, food.name);
     const entry={...food,meal:mealType,time:new Date().toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"})};
     setDailyLog(prev=>({...prev,[today]:{meals:[...(prev[today]?.meals||[]),entry]}}));
     setRecentFoods(prev=>[food,...prev.filter(f=>f.name!==food.name)].slice(0,20));
@@ -962,7 +979,7 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
   const hungerColor=foxState.hunger>70?C.accent:foxState.hunger>40?C.gold:C.green;
   const energyColor=foxState.energy>60?C.green:foxState.energy>30?C.gold:C.accent;
   const happinessColor=(foxState.happiness??70)>60?C.green:(foxState.happiness??70)>30?C.gold:C.accent;
-  const reactionColors={happy:C.green,energetic:C.gold,neutral:C.purple,sad:C.accent};
+  const reactionColors={happy:C.green,energetic:C.gold,neutral:C.purple,sad:C.accent,relieved:C.blue};
 
   return(
     <div style={{minHeight:"100vh",background:C.bg,fontFamily:"system-ui,sans-serif",maxWidth:420,margin:"0 auto",padding:"16px 16px 100px"}}>
@@ -1128,3 +1145,4 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
     </div>
   );
 }
+
