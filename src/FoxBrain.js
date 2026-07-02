@@ -46,9 +46,13 @@ function deriveColors(streak) {
 }
 
 // Espressioni per mood — dati puramente visivi, nessuna logica
+// v1.4: aggiunto "content" — stato intermedio tra "neutral" e "happy", usato
+// dal sistema di mood graduale (moodIndex) in App.jsx quando la volpe sta
+// migliorando ma non è ancora del tutto "happy".
 const MOOD_EXPR = {
   happy:   { bY:-3, bCurve:6,  mouth:"M 46 65 Q 52 72 58 65", eH:0.62, open:true,  cheeksUp:true,  mouthFill:true,  mouthFillOpacity:0.18, sparkleBrows:false, earMood:"relaxed", sleepy:false },
   excited: { bY:-6, bCurve:9,  mouth:"M 43 64 Q 52 76 61 64", eH:1.12, open:true,  cheeksUp:true,  mouthFill:true,  mouthFillOpacity:0.22, sparkleBrows:true,  earMood:"up",      sleepy:false },
+  content: { bY:-1, bCurve:3,  mouth:"M 46 66 Q 52 71 58 66", eH:0.85, open:true,  cheeksUp:false, mouthFill:true,  mouthFillOpacity:0.10, sparkleBrows:false, earMood:"relaxed", sleepy:false },
   neutral: { bY:0,  bCurve:1,  mouth:"M 46 67 Q 52 70 58 67", eH:1.0,  open:true,  cheeksUp:false, mouthFill:false, mouthFillOpacity:0,    sparkleBrows:false, earMood:"up",      sleepy:false },
   sad:     { bY:4,  bCurve:-5, mouth:"M 46 71 Q 52 65 58 71", eH:0.88, open:true,  cheeksUp:false, mouthFill:false, mouthFillOpacity:0,    sparkleBrows:false, earMood:"down",    sleepy:false },
   // drowsy: pose "lying" (2-4h senza mangiare) — occhi socchiusi, non ancora chiusi del tutto
@@ -87,7 +91,7 @@ export function deriveVisualState({ mood, lastFedAt }) {
 }
 
 // ─── HOOK PRINCIPALE ─────────────────────────────────────────────────────────
-export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, earTwitch }) {
+export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch }) {
   return useMemo(() => {
     const stage               = deriveStage(streak);
     const colors               = deriveColors(streak);
@@ -105,8 +109,10 @@ export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, earTwitch })
         : baseEarAngle;
 
     // Animazione corpo — ora segue la pose reale, non solo il mood emotivo
+    // v1.4: "stretch" (si stiracchia) ha priorità subito dopo bounce/hop
     const bodyAnim = bounce       ? "fox-bounce"
       : hop                       ? "fox-hop"
+      : stretch                   ? "fox-stretch"
       : pose === "asleep"         ? "fox-breathe"
       : pose === "lying"          ? "fox-drowsy"
       : visualMood === "sad"      ? "fox-sad"
@@ -127,6 +133,6 @@ export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, earTwitch })
       // metadati
       pose, visualMood, intent, hoursSinceLastFed,
     };
-  }, [mood, streak, lastFedAt, bounce, hop, earTwitch]);
+  }, [mood, streak, lastFedAt, bounce, hop, stretch, earTwitch]);
 }
 
