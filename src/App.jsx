@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, memo } from "react";
 import Fox from "./Fox";
 import { useNutriFox, GOALS, sumMacros } from "./useNutriFox";
 
@@ -27,7 +27,7 @@ const C = {
 };
 
 // ─── HUNGER/ENERGY BAR ────────────────────────────────────────────────────────
-function StatBar({ label, value, color, icon }) {
+const StatBar = memo(function StatBar({ label, value, color, icon }) {
   return (
     <div style={{flex:1}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
@@ -39,7 +39,7 @@ function StatBar({ label, value, color, icon }) {
       </div>
     </div>
   );
-}
+});
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function NutriFox() {
@@ -69,17 +69,27 @@ export default function NutriFox() {
   const [builderSearch,setBuilderSearch]=useState("");
   const [builderCategory,setBuilderCategory]=useState("Tutti");
 
-  const inp={width:"100%",background:"#0F0A1A",border:"1px solid #2D1F45",borderRadius:10,color:C.text,padding:"10px 14px",fontSize:15,boxSizing:"border-box",outline:"none"};
+  const inp={width:"100%",background:"#0F0A1A",border:"1px solid #2D1F45",borderRadius:10,color:C.text,padding:"10px 14px",fontSize:15,boxSizing:"border-box"};
 
-  // Derivazioni puramente di presentazione (filtri su stato UI-locale) —
-  // usano i dati/azioni del motore ma la logica di filtro qui è solo "cosa
-  // mostro ora in questa schermata", non una regola di business.
+  // Liste filtrate: memoizzate così non si ricalcolano ad ogni render (es.
+  // quando cambia solo il popup di reazione dopo un pasto, o durante il decay).
   const pool=getPool(activeCategory);
-  const filteredFoods=search?ALL_FOODS.filter(f=>f.name.toLowerCase().includes(search.toLowerCase())):pool;
+  const filteredFoods=useMemo(
+    ()=>search?ALL_FOODS.filter(f=>f.name.toLowerCase().includes(search.toLowerCase())):pool,
+    [search,pool,ALL_FOODS]
+  );
   const bPool=builderCategory==="Tutti"?ALL_FOODS:(FOOD_DB[builderCategory]||[]);
-  const filteredBuilder=builderSearch?ALL_FOODS.filter(f=>f.name.toLowerCase().includes(builderSearch.toLowerCase())):bPool;
-  const builderTotals = sumMacros(builderIngredients);
+  const filteredBuilder=useMemo(
+    ()=>builderSearch?ALL_FOODS.filter(f=>f.name.toLowerCase().includes(builderSearch.toLowerCase())):bPool,
+    [builderSearch,bPool,ALL_FOODS]
+  );
+  const builderTotals = useMemo(()=>sumMacros(builderIngredients),[builderIngredients]);
   const bKcal=builderTotals.kcal, bP=builderTotals.p, bC=builderTotals.c, bF=builderTotals.f;
+
+  // Messaggi di validazione per i form (mancavano in v1.4.1: cliccare "Aggiungi"
+  // o "Salva piatto" senza compilare i campi non dava alcun feedback visibile).
+  const [customFoodError, setCustomFoodError] = useState("");
+  const [recipeError, setRecipeError] = useState("");
 
   // ── AI COACH SCREEN ─────────────────────────────────────────────────────────
   if(screen==="coach") return(
@@ -154,9 +164,9 @@ export default function NutriFox() {
             onChange={e=>setAiInput(e.target.value)}
             onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&askFox(aiInput)}
             placeholder={"Chiedi qualcosa a "+foxName+"..."}
-            style={{flex:1,background:"#0F0A1A",border:`1px solid ${C.cardBorder}`,borderRadius:12,color:C.text,padding:"11px 14px",fontSize:14,outline:"none"}}
+            style={{flex:1,background:"#0F0A1A",border:`1px solid ${C.cardBorder}`,borderRadius:12,color:C.text,padding:"11px 14px",fontSize:14}}
           />
-          <button onClick={()=>askFox(aiInput)} disabled={aiLoading||!aiInput.trim()}
+          <button onClick={()=>askFox(aiInput)} disabled={aiLoading||!aiInput.trim()} aria-label="Invia messaggio"
             style={{background:aiLoading||!aiInput.trim()?"#2D1F45":`linear-gradient(135deg,${C.accent},#E8553F)`,border:"none",borderRadius:12,color:"white",padding:"11px 16px",fontSize:16,cursor:aiLoading?"not-allowed":"pointer",flexShrink:0,transition:"all 0.2s"}}>
             {aiLoading?"...":"➤"}
           </button>
@@ -226,19 +236,21 @@ export default function NutriFox() {
                 <span style={{color:C.text,fontSize:13}}>{ing.name}</span>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
                   <span style={{color:C.accent,fontSize:12,fontWeight:600}}>{ing.kcal}</span>
-                  <button onClick={()=>{const a=[...builderIngredients];a.splice(i,1);setBuilderIngredients(a);}} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:14}}>✕</button>
+                  <button onClick={()=>{const a=[...builderIngredients];a.splice(i,1);setBuilderIngredients(a);}} aria-label={`Rimuovi ${ing.name}`} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:14}}>✕</button>
                 </div>
               </div>
             ))}
             <button
               onClick={()=>{
+                if(!builderName.trim()){ setRecipeError("Dai un nome al piatto prima di salvarlo"); return; }
                 if(saveRecipe(builderName, builderIngredients)){
-                  setBuilderName(""); setBuilderIngredients([]); setBuilderSearch(""); setScreen("log");
+                  setBuilderName(""); setBuilderIngredients([]); setBuilderSearch(""); setRecipeError(""); setScreen("log");
                 }
               }}
               style={{width:"100%",background:C.green,border:"none",borderRadius:10,color:"#0F0A1A",padding:11,fontSize:14,fontWeight:700,cursor:"pointer",marginTop:8}}>
               Salva piatto
             </button>
+            {recipeError&&<p role="alert" style={{color:C.accent,fontSize:12,textAlign:"center",marginTop:8,marginBottom:0}}>{recipeError}</p>}
           </div>
         )}
         <div style={{background:C.card,border:`1px solid ${C.cardBorder}`,borderRadius:16,padding:16}}>
@@ -301,7 +313,7 @@ export default function NutriFox() {
                   </div>
                   <span style={{color:C.accent,fontWeight:700,fontSize:13,flexShrink:0}}>{f.kcal}</span>
                 </button>
-                <button onClick={()=>toggleFavorite(f.name)} style={{background:"none",border:"none",borderLeft:`1px solid ${C.cardBorder}`,color:favorites.includes(f.name)?C.gold:C.muted,fontSize:16,padding:"0 12px",cursor:"pointer",alignSelf:"stretch",display:"flex",alignItems:"center",flexShrink:0}}>
+                <button onClick={()=>toggleFavorite(f.name)} aria-label={favorites.includes(f.name)?`Rimuovi ${f.name} dai preferiti`:`Aggiungi ${f.name} ai preferiti`} aria-pressed={favorites.includes(f.name)} style={{background:"none",border:"none",borderLeft:`1px solid ${C.cardBorder}`,color:favorites.includes(f.name)?C.gold:C.muted,fontSize:16,padding:"0 12px",cursor:"pointer",alignSelf:"stretch",display:"flex",alignItems:"center",flexShrink:0}}>
                   {favorites.includes(f.name)?"★":"☆"}
                 </button>
               </div>
@@ -336,13 +348,15 @@ export default function NutriFox() {
           ))}
           <button
             onClick={()=>{
+              if(!customFood.name.trim()||!customFood.kcal){ setCustomFoodError("Servono almeno nome e calorie"); return; }
               if(addCustomFood(customFood, mealType)){
-                setCustomFood({name:"",kcal:"",p:"",c:"",f:""}); setSearch(""); setScreen("home");
+                setCustomFood({name:"",kcal:"",p:"",c:"",f:""}); setCustomFoodError(""); setSearch(""); setScreen("home");
               }
             }}
             style={{background:C.accent,border:"none",borderRadius:12,color:"white",padding:13,fontSize:15,fontWeight:700,cursor:"pointer"}}>
             Aggiungi
           </button>
+          {customFoodError&&<p role="alert" style={{color:C.accent,fontSize:12,textAlign:"center",margin:0}}>{customFoodError}</p>}
         </div>
       )}
     </div>
@@ -453,7 +467,7 @@ export default function NutriFox() {
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
           <div style={{background:`${C.gold}22`,border:`1px solid ${C.gold}`,borderRadius:20,padding:"4px 12px",fontSize:12,color:C.gold,fontWeight:700}}>🔥 {streak}</div>
-          <button onClick={()=>setScreen("settings")} style={{background:C.card,border:`1px solid ${C.cardBorder}`,borderRadius:10,color:C.muted,padding:"8px 10px",cursor:"pointer",fontSize:16}}>⚙️</button>
+          <button onClick={()=>setScreen("settings")} aria-label="Impostazioni" style={{background:C.card,border:`1px solid ${C.cardBorder}`,borderRadius:10,color:C.muted,padding:"8px 10px",cursor:"pointer",fontSize:16}}>⚙️</button>
         </div>
       </div>
 
@@ -556,7 +570,7 @@ export default function NutriFox() {
         </div>
         <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}}>
           {Array.from({length:targetWater},(_,i)=>(
-            <button key={i} onClick={()=>setWater(i<water?i:i+1)} style={{fontSize:18,background:"none",border:"none",cursor:"pointer",padding:1,opacity:i<water?1:0.2,transition:"opacity 0.2s"}}>💧</button>
+            <button key={i} onClick={()=>setWater(i<water?i:i+1)} aria-label={`Bicchiere ${i+1}${i<water?" (bevuto)":""}`} aria-pressed={i<water} style={{fontSize:18,background:"none",border:"none",cursor:"pointer",padding:1,opacity:i<water?1:0.2,transition:"opacity 0.2s"}}>💧</button>
           ))}
         </div>
         <div style={{height:4,background:"#0F0A1A",borderRadius:2,overflow:"hidden"}}>
@@ -582,7 +596,7 @@ export default function NutriFox() {
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:6,marginLeft:8,flexShrink:0}}>
                   <span style={{color:C.accent,fontWeight:700,fontSize:12}}>{m.kcal}</span>
-                  <button onClick={()=>removeFood(i)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:13,lineHeight:1}}>✕</button>
+                  <button onClick={()=>removeFood(i)} aria-label={`Rimuovi ${m.name}`} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:13,lineHeight:1}}>✕</button>
                 </div>
               </div>
             ))}
@@ -595,7 +609,7 @@ export default function NutriFox() {
         <button onClick={()=>setScreen("home")} style={{background:"none",border:"none",color:screen==="home"?C.accent:C.muted,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,fontSize:10}}>
           <span style={{fontSize:20}}>🏠</span>Home
         </button>
-        <button onClick={()=>setScreen("log")} style={{background:`linear-gradient(135deg,${C.accent},#E8553F)`,border:"none",borderRadius:"50%",width:54,height:54,color:"white",fontSize:28,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 4px 20px ${C.accent}66`}}>+</button>
+        <button onClick={()=>setScreen("log")} aria-label="Aggiungi pasto" style={{background:`linear-gradient(135deg,${C.accent},#E8553F)`,border:"none",borderRadius:"50%",width:54,height:54,color:"white",fontSize:28,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 4px 20px ${C.accent}66`}}>+</button>
         <button onClick={()=>setScreen("history")} style={{background:"none",border:"none",color:screen==="history"?C.accent:C.muted,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,fontSize:10}}>
           <span style={{fontSize:20}}>📅</span>Storico
         </button>
