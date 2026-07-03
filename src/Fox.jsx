@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, memo } from "react";
 import { useFoxBrain, deriveVisualState } from "./FoxBrain";
 import { useFoxAnimations, getAnimationIntent } from "./FoxAnimations";
 import FoxSVG from "./FoxSVG";
@@ -22,7 +22,7 @@ export function getFoxStage(streak) {
   return                   { name:"Cucciolo",    color:"#F4845F", aura:false, scale:1.0  };
 }
 
-export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFedAt = null, licking = false }) {
+function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFedAt = null, licking = false }) {
 
   // 1. Pose + visualMood derivati con la stessa funzione pura usata da useFoxBrain,
   //    così l'intent delle animazioni idle è SEMPRE coerente con la pose reale.
@@ -52,8 +52,10 @@ export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce =
   }, [bounce]);
   const resolvedBodyAnim = bodyAnim === "fox-bounce" && bounceVariant === 2 ? "fox-bounce2" : bodyAnim;
 
+  const moodDescriptions = { happy:"felice", excited:"euforica", content:"serena", neutral:"tranquilla", sad:"un po' giù", drowsy:"assopita", sleeping:"addormentata" };
+
   return (
-    <div style={{ position:"relative", display:"inline-block", lineHeight:0 }}>
+    <div role="img" aria-label={`Volpe, stato: ${moodDescriptions[brain.visualMood] || "tranquilla"}`} style={{ position:"relative", display:"inline-block", lineHeight:0 }}>
 
       {/* Aura leggendaria */}
       {stage.aura && (
@@ -131,8 +133,20 @@ export default function Fox({ mood = "neutral", streak = 0, size = 160, bounce =
         @keyframes torsoBreathe { 0%,100%{ transform:scaleY(1); } 50%{ transform:scaleY(1.015); } }
         @keyframes aura       { 0%,100%{ opacity:.5; transform:scale(1); } 50%{ opacity:1; transform:scale(1.06); } }
         @keyframes pfloat     { 0%{ transform:translateY(0); opacity:1; } 100%{ transform:translateY(-50px); opacity:0; } }
+
+        /* Rispetta la preferenza di sistema per il movimento ridotto: le
+           animazioni ambientali continue (idle/breathe/drowsy/excited/sad)
+           si fermano, quelle di feedback (bounce/hop/stretch/lick) restano
+           ma molto più brevi, per non perdere il riscontro dell'interazione. */
+        @media (prefers-reduced-motion: reduce) {
+          .fox-idle, .fox-breathe, .fox-drowsy, .fox-sad, .fox-excited,
+          .fox-torso-group { animation: none !important; }
+          .fox-bounce, .fox-bounce2, .fox-hop, .fox-stretch, .fox-tongue { animation-duration: 0.15s !important; }
+          .fox-head-group { transition-duration: 0.15s !important; }
+        }
       `}</style>
     </div>
   );
 }
 
+export default memo(Fox);
