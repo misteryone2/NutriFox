@@ -11,7 +11,7 @@ export default function FoxSVG({
   const eyesClosed = ex.open === false || blink || yawning;
 
   return (
-    <svg width="100%" height="100%" viewBox="0 0 104 123"
+    <svg width="100%" height="100%" viewBox="0 0 104 123" aria-hidden="true"
       style={{ display:"block", overflow:"visible" }}>
       <defs>
         <radialGradient id="fur" cx="38%" cy="28%" r="68%">
