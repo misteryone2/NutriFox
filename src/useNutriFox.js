@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { getFoxStage } from "./Fox";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -52,6 +52,7 @@ export const FOOD_DB = {
     { name:"Polpette al sugo (3)",      kcal:280, p:18, c:12, f:17,  type:"protein" },
     { name:"Pollo alla cacciatora",     kcal:260, p:28, c:6,  f:14,  type:"protein" },
     { name:"Tonno alla griglia",        kcal:200, p:34, c:0,  f:7,   type:"protein" },
+    { name:"Petto di tacchino grigliato", kcal:150, p:32, c:0, f:1.8, type:"protein" },
   ],
   "Uova e Latticini": [
     { name:"Uovo intero",               kcal:78,  p:6,  c:0.6,f:5,   type:"protein" },
@@ -105,7 +106,6 @@ export const FOOD_DB = {
     { name:"Avena (porridge 200ml)",    kcal:150, p:5,  c:27, f:3,   type:"carb"    },
     { name:"Crackers (5 pz)",           kcal:110, p:2.5,c:18, f:3.5, type:"carb"    },
     { name:"Pasta alla carbonara",      kcal:460, p:18, c:55, f:18,  type:"carb"    },
-    { name:"Risotto ai funghi",         kcal:340, p:8,  c:58, f:9,   type:"carb"    },
   ],
   "Verdure e Legumi": [
     { name:"Insalata mista",            kcal:15,  p:1,  c:2,  f:0.2, type:"light"   },
@@ -140,6 +140,7 @@ export const FOOD_DB = {
     { name:"Caponata (100g)",           kcal:90,  p:1.5,c:9,  f:5,   type:"light"   },
     { name:"Melanzane a funghetto",     kcal:90,  p:2,  c:8,  f:6,   type:"light"   },
     { name:"Zucca al forno (150g)",     kcal:65,  p:1.5,c:14, f:0.3, type:"light"   },
+    { name:"Hummus di ceci fatto in casa (50g)", kcal:120, p:4.5,c:9,  f:8,  type:"protein" },
   ],
   "Frutta": [
     { name:"Mela",                      kcal:72,  p:0.4,c:19, f:0.2, type:"light"   },
@@ -246,6 +247,7 @@ export const FOOD_DB = {
     { name:"Panna cotta",               kcal:220, p:3,  c:25, f:12,  type:"fat"     },
     { name:"Pancake (2)",               kcal:220, p:6,  c:34, f:7,   type:"carb"    },
     { name:"Porridge alla frutta",      kcal:230, p:7,  c:38, f:5,   type:"carb"    },
+    { name:"Skyr naturale (150g)",      kcal:95,  p:16, c:6,  f:0.3, type:"protein" },
   ],
   "Bevande": [
     { name:"Acqua",                     kcal:0,   p:0,  c:0,  f:0,   type:"light"   },
@@ -353,13 +355,23 @@ function pickReaction(type, foodName) {
   return foodName ? msg.replace("{food}", foodName) : msg.replace("{food} ","").replace("{food}","Buono");
 }
 
+// Genera le chiavi data (YYYY-MM-DD) degli ultimi n giorni. offset=0 include
+// oggi, offset=1 parte da ieri. Prima duplicata identica in getFoodMemoryCount
+// e getMealRoutine — ora un'unica funzione condivisa.
+function lastNDayKeys(n, offset=0) {
+  const keys = [];
+  for (let i = offset; i < offset+n; i++) {
+    const d = new Date(); d.setDate(d.getDate()-i);
+    keys.push(d.toISOString().split("T")[0]);
+  }
+  return keys;
+}
+
 // Quante volte un dato alimento è stato mangiato negli ultimi 7 giorni
 // (oggi incluso). Usata per frasi tipo "È il terzo yogurt questa settimana!".
 function getFoodMemoryCount(dailyLog, foodName) {
   let count = 0;
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(); d.setDate(d.getDate()-i);
-    const key = d.toISOString().split("T")[0];
+  for (const key of lastNDayKeys(7)) {
     const meals = dailyLog[key]?.meals || [];
     count += meals.filter(m => m.name === foodName).length;
   }
@@ -376,9 +388,7 @@ function ordinalIt(n) {
 // oggi), solo se ci sono abbastanza dati per parlare davvero di "abitudine".
 function getMealRoutine(dailyLog, mealType) {
   const hours = [];
-  for (let i = 1; i <= 14; i++) {
-    const d = new Date(); d.setDate(d.getDate()-i);
-    const key = d.toISOString().split("T")[0];
+  for (const key of lastNDayKeys(14, 1)) {
     const meals = dailyLog[key]?.meals || [];
     meals.filter(m => m.meal === mealType).forEach(m => {
       const h = parseInt((m.time||"").split(":")[0], 10);
@@ -575,8 +585,9 @@ export function useNutriFox() {
 
   const today    = todayKey();
   const todayData= dailyLog[today]||{meals:[]};
-  const streak   = getStreak(dailyLog);
-  const stage    = getFoxStage(streak);
+  // streak itera fino a 60 giorni di log: memoizzato, ricalcola solo se dailyLog cambia
+  const streak   = useMemo(()=>getStreak(dailyLog),[dailyLog]);
+  const stage    = useMemo(()=>getFoxStage(streak),[streak]);
   const mood     = MOOD_ORDER[foxState.moodIndex ?? computeTargetMoodIndex(foxState.hunger, foxState.energy, foxState.happiness??70)];
 
   function goalKcal(){
@@ -591,16 +602,22 @@ export function useNutriFox() {
   const gKcal     = goalKcal();
   const targetWater = Math.round(((Number(profile.weight)||70)*35+(totalKcal/1000)*300)/250);
 
-  const weekDays = Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-i);return d.toISOString().split("T")[0];});
-  const weekKcals= weekDays.map(d=>sumMacros(dailyLog[d]?.meals||[]).kcal);
-  const weekAvg  = Math.round(weekKcals.filter(k=>k>0).reduce((s,k)=>s+k,0)/(weekKcals.filter(k=>k>0).length||1));
+  // weekAvg itera 7 giorni e somma i pasti di ciascuno: memoizzato
+  const weekAvg = useMemo(()=>{
+    const weekKcals = lastNDayKeys(7).map(d=>sumMacros(dailyLog[d]?.meals||[]).kcal);
+    const nonZero = weekKcals.filter(k=>k>0);
+    return Math.round(nonZero.reduce((s,k)=>s+k,0)/(nonZero.length||1));
+  },[dailyLog]);
 
   const hoursSinceLastFed = foxState.lastFedAt ? (Date.now()-foxState.lastFedAt)/3600000 : null;
 
-  const contextualMessage = getContextualMessage({
+  // contextualMessage chiama memoria/routine (cicli su 7-14 giorni): memoizzato
+  // sulle dipendenze reali, non ricalcola ad ogni tick di decay se nulla di
+  // rilevante è cambiato.
+  const contextualMessage = useMemo(()=>getContextualMessage({
     hoursSinceLastFed, water, targetWater, totalP, mealsCount:todayData.meals.length,
     totalKcal, gKcal, mood, foxName, dailyLog, todayMeals:todayData.meals,
-  });
+  }),[hoursSinceLastFed, water, targetWater, totalP, todayData.meals, totalKcal, gKcal, mood, foxName, dailyLog]);
 
   // Effetti di ricompensa: si attivano una sola volta per evento al giorno.
   useEffect(()=>{
@@ -676,6 +693,7 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
         })
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data?.error?.message || "Richiesta non riuscita");
       const reply = data.content?.[0]?.text || "Uhm... non riesco a rispondere ora!";
       setAiMessages(prev=>[...prev,{role:"assistant",content:reply}]);
       setBounce(true); setTimeout(()=>setBounce(false),600);
