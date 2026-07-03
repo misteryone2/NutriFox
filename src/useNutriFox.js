@@ -1,0 +1,761 @@
+import { useState, useEffect, useRef } from "react";
+import { getFoxStage } from "./Fox";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// useNutriFox.js — v1.4.1
+//
+// Release di consolidamento tecnico: tutta la logica di business che prima
+// viveva dentro App.jsx (gestione pasti, idratazione, statistiche, dialoghi,
+// memoria della volpe, calcoli nutrizionali, mood, persistenza) è stata
+// spostata qui in un unico hook. App.jsx resta responsabile solo di
+// orchestrare la UI: navigazione tra schermate, stato dei form, rendering.
+//
+// Nessuna funzionalità nuova, nessun comportamento cambiato — solo
+// riorganizzazione. Le funzioni pure (mood, dialoghi, memoria) restano
+// pure e senza side-effect, così come nella v1.4.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── FOOD DATABASE (normalizzato per porzione standard) ───────────────────────
+// v1.4.1: struttura invariata ma isolata in cima al modulo e già esportata —
+// pronta per essere spostata in un file dedicato (es. FOOD_DB.js) in futuro
+// con un semplice taglia-incolla, senza toccare il resto della logica.
+export const FOOD_DB = {
+  "Carne e Pesce": [
+    { name:"Petto di pollo",            kcal:165, p:31, c:0,  f:3.6, type:"protein" },
+    { name:"Coscia di pollo",           kcal:215, p:26, c:0,  f:12,  type:"protein" },
+    { name:"Pollo arrosto",             kcal:239, p:27, c:0,  f:14,  type:"protein" },
+    { name:"Bistecca di manzo",         kcal:250, p:26, c:0,  f:16,  type:"protein" },
+    { name:"Macinato di manzo",         kcal:280, p:25, c:0,  f:20,  type:"protein" },
+    { name:"Lonza di maiale",           kcal:185, p:29, c:0,  f:7,   type:"protein" },
+    { name:"Fesa di tacchino",          kcal:135, p:29, c:0,  f:1.5, type:"protein" },
+    { name:"Agnello (coscia)",          kcal:258, p:25, c:0,  f:17,  type:"protein" },
+    { name:"Salmone al forno",          kcal:208, p:28, c:0,  f:10,  type:"protein" },
+    { name:"Tonno in scatola",          kcal:130, p:28, c:0,  f:1.5, type:"protein" },
+    { name:"Merluzzo",                  kcal:82,  p:18, c:0,  f:0.7, type:"protein" },
+    { name:"Orata al forno",            kcal:120, p:22, c:0,  f:3.5, type:"protein" },
+    { name:"Branzino al forno",         kcal:115, p:21, c:0,  f:3.2, type:"protein" },
+    { name:"Sgombro in scatola",        kcal:200, p:19, c:0,  f:14,  type:"protein" },
+    { name:"Alici sott'olio (50g)",     kcal:95,  p:13, c:0,  f:5,   type:"protein" },
+    { name:"Polpo lessato",             kcal:82,  p:15, c:2,  f:1,   type:"protein" },
+    { name:"Seppie",                    kcal:79,  p:16, c:0.8,f:1,   type:"protein" },
+    { name:"Gamberetti",                kcal:99,  p:20, c:0.9,f:1.7, type:"protein" },
+    { name:"Cozze (100g)",              kcal:86,  p:12, c:3.7,f:2.2, type:"protein" },
+    { name:"Prosciutto cotto",          kcal:130, p:19, c:1,  f:5.5, type:"protein" },
+    { name:"Prosciutto di Parma",       kcal:90,  p:7,  c:0,  f:7,   type:"protein" },
+    { name:"Culatello",                 kcal:95,  p:8,  c:0,  f:7,   type:"protein" },
+    { name:"Bresaola",                  kcal:98,  p:21, c:0,  f:1.5, type:"protein" },
+    { name:"Mortadella Bologna",        kcal:155, p:7.5,c:0.5,f:14,  type:"fat"     },
+    { name:"Salsiccia",                 kcal:302, p:13, c:2,  f:27,  type:"fat"     },
+    { name:"Cotechino (porzione)",      kcal:320, p:14, c:1,  f:29,  type:"fat"     },
+    { name:"Cotoletta alla bolognese",  kcal:380, p:28, c:12, f:24,  type:"protein" },
+    { name:"Spezzatino di manzo",       kcal:210, p:24, c:4,  f:10,  type:"protein" },
+    { name:"Polpette al sugo (3)",      kcal:280, p:18, c:12, f:17,  type:"protein" },
+    { name:"Pollo alla cacciatora",     kcal:260, p:28, c:6,  f:14,  type:"protein" },
+    { name:"Tonno alla griglia",        kcal:200, p:34, c:0,  f:7,   type:"protein" },
+  ],
+  "Uova e Latticini": [
+    { name:"Uovo intero",               kcal:78,  p:6,  c:0.6,f:5,   type:"protein" },
+    { name:"Uova strapazzate (2)",      kcal:180, p:14, c:1,  f:13,  type:"protein" },
+    { name:"Frittata (2 uova)",         kcal:210, p:14, c:2,  f:16,  type:"protein" },
+    { name:"Uova sode (2)",             kcal:156, p:12, c:1,  f:11,  type:"protein" },
+    { name:"Mozzarella",                kcal:280, p:18, c:2,  f:22,  type:"fat"     },
+    { name:"Parmigiano Reggiano",       kcal:119, p:10, c:0,  f:8.5, type:"protein" },
+    { name:"Grana Padano",              kcal:114, p:10, c:0,  f:8,   type:"protein" },
+    { name:"Pecorino (30g)",            kcal:120, p:8,  c:0.5,f:10,  type:"fat"     },
+    { name:"Ricotta",                   kcal:174, p:11, c:3,  f:13,  type:"fat"     },
+    { name:"Squacquerone (50g)",        kcal:130, p:6,  c:1,  f:11,  type:"fat"     },
+    { name:"Stracchino (50g)",          kcal:120, p:7,  c:0.5,f:10,  type:"fat"     },
+    { name:"Yogurt greco",              kcal:100, p:10, c:6,  f:3,   type:"protein" },
+    { name:"Yogurt bianco",             kcal:61,  p:3.5,c:7,  f:1.5, type:"light"   },
+    { name:"Kefir (200ml)",             kcal:90,  p:6,  c:9,  f:2.5, type:"protein" },
+    { name:"Latte intero (200ml)",      kcal:130, p:6.6,c:9.6,f:7.4, type:"fat"     },
+    { name:"Latte scremato (200ml)",    kcal:70,  p:6.8,c:9.8,f:0.2, type:"light"   },
+    { name:"Burrata",                   kcal:330, p:15, c:2,  f:30,  type:"fat"     },
+  ],
+  "Pasta e Cereali": [
+    { name:"Pasta al pomodoro",         kcal:350, p:12, c:65, f:5,   type:"carb"    },
+    { name:"Pasta in bianco",           kcal:290, p:10, c:58, f:3,   type:"carb"    },
+    { name:"Pasta al pesto",            kcal:420, p:12, c:60, f:16,  type:"carb"    },
+    { name:"Pasta alla norma",          kcal:380, p:10, c:62, f:11,  type:"carb"    },
+    { name:"Pasta al ragu",             kcal:450, p:20, c:58, f:15,  type:"carb"    },
+    { name:"Pasta e fagioli",           kcal:280, p:14, c:45, f:5,   type:"carb"    },
+    { name:"Pasta e ceci",              kcal:290, p:13, c:48, f:4,   type:"carb"    },
+    { name:"Tagliatelle al ragu",       kcal:480, p:22, c:52, f:18,  type:"carb"    },
+    { name:"Tortellini in brodo",       kcal:320, p:14, c:42, f:10,  type:"carb"    },
+    { name:"Tortellini panna e prosciutto", kcal:520, p:18, c:48, f:26, type:"fat"  },
+    { name:"Lasagne verdi bolognese",   kcal:420, p:20, c:38, f:20,  type:"carb"    },
+    { name:"Spaghetti alle vongole",    kcal:380, p:18, c:58, f:9,   type:"carb"    },
+    { name:"Riso bollito",              kcal:130, p:2.7,c:28, f:0.3, type:"carb"    },
+    { name:"Riso integrale",            kcal:150, p:3.5,c:30, f:1.5, type:"carb"    },
+    { name:"Risotto ai funghi",         kcal:320, p:8,  c:52, f:9,   type:"carb"    },
+    { name:"Risotto allo zafferano",    kcal:340, p:8,  c:55, f:10,  type:"carb"    },
+    { name:"Risotto ai gamberetti",     kcal:360, p:16, c:52, f:9,   type:"carb"    },
+    { name:"Gnocchi al pomodoro",       kcal:310, p:8,  c:58, f:5,   type:"carb"    },
+    { name:"Pane bianco",               kcal:134, p:4,  c:27, f:0.9, type:"carb"    },
+    { name:"Pane integrale",            kcal:120, p:5,  c:22, f:1.5, type:"carb"    },
+    { name:"Pane di segale",            kcal:110, p:4.5,c:20, f:1,   type:"carb"    },
+    { name:"Focaccia (100g)",           kcal:280, p:7,  c:40, f:9,   type:"carb"    },
+    { name:"Piadina romagnola",         kcal:290, p:7,  c:42, f:10,  type:"carb"    },
+    { name:"Gnocco fritto",             kcal:340, p:6,  c:38, f:18,  type:"fat"     },
+    { name:"Tigella",                   kcal:220, p:6,  c:32, f:8,   type:"carb"    },
+    { name:"Polenta (100g)",            kcal:83,  p:2,  c:18, f:0.5, type:"carb"    },
+    { name:"Farro (100g cotto)",        kcal:150, p:6,  c:30, f:1,   type:"carb"    },
+    { name:"Orzo (100g cotto)",         kcal:123, p:3,  c:25, f:0.4, type:"carb"    },
+    { name:"Quinoa (100g cotta)",       kcal:120, p:4.4,c:22, f:1.9, type:"carb"    },
+    { name:"Avena (porridge 200ml)",    kcal:150, p:5,  c:27, f:3,   type:"carb"    },
+    { name:"Crackers (5 pz)",           kcal:110, p:2.5,c:18, f:3.5, type:"carb"    },
+    { name:"Pasta alla carbonara",      kcal:460, p:18, c:55, f:18,  type:"carb"    },
+    { name:"Risotto ai funghi",         kcal:340, p:8,  c:58, f:9,   type:"carb"    },
+  ],
+  "Verdure e Legumi": [
+    { name:"Insalata mista",            kcal:15,  p:1,  c:2,  f:0.2, type:"light"   },
+    { name:"Pomodori (100g)",           kcal:18,  p:0.9,c:3.5,f:0.2, type:"light"   },
+    { name:"Zucchine",                  kcal:17,  p:1.2,c:3.1,f:0.3, type:"light"   },
+    { name:"Melanzane",                 kcal:25,  p:1,  c:6,  f:0.2, type:"light"   },
+    { name:"Peperoni",                  kcal:31,  p:1,  c:6,  f:0.3, type:"light"   },
+    { name:"Spinaci",                   kcal:23,  p:2.9,c:3.6,f:0.4, type:"light"   },
+    { name:"Broccoli",                  kcal:34,  p:2.8,c:7,  f:0.4, type:"light"   },
+    { name:"Cavolfiore",                kcal:25,  p:1.9,c:5,  f:0.3, type:"light"   },
+    { name:"Carote (100g)",             kcal:41,  p:0.9,c:10, f:0.2, type:"light"   },
+    { name:"Asparagi (100g)",           kcal:20,  p:2.2,c:3.7,f:0.2, type:"light"   },
+    { name:"Carciofi (100g)",           kcal:47,  p:3.3,c:10, f:0.2, type:"light"   },
+    { name:"Fagiolini (100g)",          kcal:31,  p:1.8,c:7,  f:0.2, type:"light"   },
+    { name:"Funghi champignon",         kcal:22,  p:3,  c:4,  f:0.3, type:"light"   },
+    { name:"Funghi porcini",            kcal:28,  p:3.7,c:4.3,f:0.5, type:"light"   },
+    { name:"Rucola (50g)",              kcal:20,  p:2.5,c:2,  f:0.7, type:"light"   },
+    { name:"Rape rosse cotte",          kcal:43,  p:1.6,c:10, f:0.2, type:"light"   },
+    { name:"Cavolo cappuccio (100g)",   kcal:25,  p:1.3,c:6,  f:0.1, type:"light"   },
+    { name:"Ceci cotti",                kcal:164, p:8.9,c:27, f:2.6, type:"carb"    },
+    { name:"Lenticchie cotte",          kcal:116, p:9,  c:20, f:0.4, type:"protein" },
+    { name:"Fagioli borlotti (100g)",   kcal:128, p:8.7,c:21, f:0.5, type:"protein" },
+    { name:"Fagioli cannellini (100g)", kcal:120, p:9,  c:20, f:0.5, type:"protein" },
+    { name:"Piselli (100g)",            kcal:81,  p:5,  c:14, f:0.4, type:"carb"    },
+    { name:"Edamame (100g)",            kcal:122, p:11, c:10, f:5,   type:"protein" },
+    { name:"Patate lesse (100g)",       kcal:77,  p:2,  c:17, f:0.1, type:"carb"    },
+    { name:"Patate al forno",           kcal:150, p:3,  c:30, f:3,   type:"carb"    },
+    { name:"Minestrone",                kcal:85,  p:4,  c:14, f:1.5, type:"light"   },
+    { name:"Passata di pomodoro (100g)",kcal:24,  p:1.1,c:5,  f:0.2, type:"light"   },
+    { name:"Erbazzone",                 kcal:220, p:8,  c:22, f:11,  type:"fat"     },
+    { name:"Zuppa di lenticchie",       kcal:140, p:9,  c:22, f:2,   type:"protein" },
+    { name:"Caponata (100g)",           kcal:90,  p:1.5,c:9,  f:5,   type:"light"   },
+    { name:"Melanzane a funghetto",     kcal:90,  p:2,  c:8,  f:6,   type:"light"   },
+    { name:"Zucca al forno (150g)",     kcal:65,  p:1.5,c:14, f:0.3, type:"light"   },
+  ],
+  "Frutta": [
+    { name:"Mela",                      kcal:72,  p:0.4,c:19, f:0.2, type:"light"   },
+    { name:"Banana",                    kcal:105, p:1.3,c:27, f:0.4, type:"carb"    },
+    { name:"Arancia",                   kcal:62,  p:1.2,c:15, f:0.2, type:"light"   },
+    { name:"Mandarino (2 pz)",          kcal:70,  p:1,  c:17, f:0.3, type:"light"   },
+    { name:"Pera",                      kcal:57,  p:0.4,c:15, f:0.1, type:"light"   },
+    { name:"Pesca",                     kcal:39,  p:0.9,c:10, f:0.3, type:"light"   },
+    { name:"Albicocche (2 pz)",         kcal:48,  p:1.4,c:11, f:0.4, type:"light"   },
+    { name:"Fragole (100g)",            kcal:32,  p:0.7,c:8,  f:0.3, type:"light"   },
+    { name:"Ciliegie (100g)",           kcal:63,  p:1,  c:16, f:0.2, type:"light"   },
+    { name:"Uva (100g)",                kcal:69,  p:0.7,c:18, f:0.2, type:"light"   },
+    { name:"Kiwi",                      kcal:61,  p:1.1,c:15, f:0.5, type:"light"   },
+    { name:"Mango (100g)",              kcal:60,  p:0.8,c:15, f:0.4, type:"light"   },
+    { name:"Ananas (100g)",             kcal:50,  p:0.5,c:13, f:0.1, type:"light"   },
+    { name:"Anguria (200g)",            kcal:60,  p:1.2,c:15, f:0.2, type:"light"   },
+    { name:"Melone (200g)",             kcal:68,  p:1.7,c:16, f:0.3, type:"light"   },
+    { name:"Lamponi (100g)",            kcal:52,  p:1.2,c:12, f:0.7, type:"light"   },
+    { name:"Mirtilli (100g)",           kcal:57,  p:0.7,c:14, f:0.3, type:"light"   },
+    { name:"Avocado",                   kcal:160, p:2,  c:9,  f:15,  type:"fat"     },
+    { name:"Frutto della passione (2)", kcal:48,  p:2,  c:11, f:0.4, type:"light"   },
+    { name:"Fico (2 pz)",               kcal:74,  p:0.8,c:19, f:0.3, type:"light"   },
+    { name:"Cocco (30g)",               kcal:106, p:1,  c:4,  f:10,  type:"fat"     },
+  ],
+  "Sughi e Condimenti": [
+    { name:"Sugo al pomodoro (100g)",   kcal:45,  p:1.5,c:8,  f:1.2, type:"light"   },
+    { name:"Sugo all'arrabbiata",       kcal:55,  p:1.5,c:8,  f:2.5, type:"light"   },
+    { name:"Ragu bolognese (100g)",     kcal:150, p:10, c:6,  f:10,  type:"protein" },
+    { name:"Pesto alla genovese (30g)", kcal:130, p:2.5,c:1.5,f:13,  type:"fat"     },
+    { name:"Besciamella (50ml)",        kcal:72,  p:2,  c:5,  f:5,   type:"fat"     },
+    { name:"Olio d'oliva (10ml)",       kcal:90,  p:0,  c:0,  f:10,  type:"fat"     },
+    { name:"Burro (10g)",               kcal:74,  p:0.1,c:0,  f:8.3, type:"fat"     },
+    { name:"Aceto balsamico (15ml)",    kcal:21,  p:0.2,c:5,  f:0,   type:"light"   },
+    { name:"Maionese (15g)",            kcal:104, p:0.2,c:0.3,f:11,  type:"fat"     },
+    { name:"Salsa di soia (15ml)",      kcal:9,   p:1.3,c:0.9,f:0,   type:"light"   },
+    { name:"Hummus (50g)",              kcal:115, p:4,  c:9,  f:7,   type:"protein" },
+    { name:"Guacamole (50g)",           kcal:80,  p:1,  c:4,  f:7,   type:"fat"     },
+    { name:"Tzatziki (50g)",            kcal:55,  p:3,  c:3,  f:3,   type:"light"   },
+    { name:"Salsa BBQ (30g)",           kcal:60,  p:0.3,c:14, f:0.2, type:"carb"    },
+  ],
+  "Surgelati": [
+    { name:"Bastoncini di pesce (2)",   kcal:160, p:8,  c:16, f:7,   type:"carb"    },
+    { name:"Sofficini (2)",             kcal:280, p:8,  c:30, f:14,  type:"carb"    },
+    { name:"Lasagne surgelate",         kcal:380, p:18, c:38, f:16,  type:"carb"    },
+    { name:"Cannelloni surgelati",      kcal:290, p:14, c:28, f:13,  type:"carb"    },
+    { name:"Pizza surgelata (meta)",    kcal:420, p:14, c:54, f:16,  type:"carb"    },
+    { name:"Crocchette pollo (3)",      kcal:220, p:12, c:18, f:11,  type:"protein" },
+    { name:"Cotolette di pesce",        kcal:180, p:10, c:14, f:9,   type:"protein" },
+    { name:"Cordon bleu (1 pz)",        kcal:280, p:16, c:16, f:16,  type:"protein" },
+    { name:"Minestrone surgelato",      kcal:60,  p:3,  c:11, f:0.5, type:"light"   },
+    { name:"Spinaci surgelati",         kcal:22,  p:2.8,c:2,  f:0.4, type:"light"   },
+    { name:"Verdure miste surgelate",   kcal:45,  p:3,  c:8,  f:0.5, type:"light"   },
+    { name:"Patatine fritte surgelate", kcal:270, p:3.5,c:36, f:13,  type:"carb"    },
+    { name:"Wurstel",                   kcal:120, p:5,  c:1,  f:11,  type:"fat"     },
+    { name:"Tortellini surgelati",      kcal:340, p:15, c:44, f:11,  type:"carb"    },
+    { name:"Burger di soia surgelato",  kcal:180, p:16, c:14, f:6,   type:"protein" },
+    { name:"Edamame surgelato (100g)",  kcal:122, p:11, c:10, f:5,   type:"protein" },
+  ],
+  "Piatti pronti": [
+    { name:"Pizza margherita (fetta)",  kcal:270, p:11, c:35, f:9,   type:"carb"    },
+    { name:"Pizza 4 stagioni (fetta)",  kcal:290, p:13, c:33, f:11,  type:"carb"    },
+    { name:"Pizza bianca (100g)",       kcal:310, p:9,  c:48, f:9,   type:"carb"    },
+    { name:"Hamburger classico",        kcal:480, p:26, c:40, f:24,  type:"fat"     },
+    { name:"Piadina squacquerone",      kcal:480, p:14, c:52, f:24,  type:"fat"     },
+    { name:"Piadina prosciutto rucola", kcal:440, p:18, c:46, f:20,  type:"carb"    },
+    { name:"Tramezzino tonno",          kcal:350, p:14, c:42, f:13,  type:"carb"    },
+    { name:"Panino al prosciutto",      kcal:320, p:16, c:38, f:10,  type:"carb"    },
+    { name:"Supplì (1 pz)",             kcal:180, p:6,  c:22, f:8,   type:"carb"    },
+    { name:"Arancino (1 pz)",           kcal:280, p:8,  c:38, f:10,  type:"carb"    },
+    { name:"Parmigiana di melanzane",   kcal:220, p:9,  c:14, f:14,  type:"fat"     },
+    { name:"Quiche lorraine (fetta)",   kcal:330, p:10, c:26, f:21,  type:"fat"     },
+    { name:"Kebab in pita",             kcal:480, p:24, c:48, f:20,  type:"carb"    },
+    { name:"Sushi misto (8 pz)",        kcal:320, p:14, c:52, f:6,   type:"carb"    },
+    { name:"Bowl di riso con salmone",  kcal:420, p:28, c:45, f:12,  type:"protein" },
+    { name:"Poke bowl salmone",         kcal:420, p:26, c:48, f:14,  type:"protein" },
+  ],
+  "Colazione e Snack": [
+    { name:"Caffe espresso",            kcal:2,   p:0.1,c:0.3,f:0,   type:"light"   },
+    { name:"Caffe macchiato",           kcal:20,  p:0.8,c:2,  f:0.7, type:"light"   },
+    { name:"Cappuccino",                kcal:80,  p:4,  c:8,  f:3,   type:"light"   },
+    { name:"Latte macchiato",           kcal:110, p:5,  c:12, f:4,   type:"light"   },
+    { name:"Tè verde",                  kcal:2,   p:0,  c:0.5,f:0,   type:"light"   },
+    { name:"Brioche",                   kcal:250, p:5,  c:38, f:9,   type:"carb"    },
+    { name:"Brioche integrale",         kcal:210, p:6,  c:34, f:7,   type:"carb"    },
+    { name:"Fette biscottate (2 pz)",   kcal:140, p:3,  c:28, f:2,   type:"carb"    },
+    { name:"Yogurt bianco",             kcal:61,  p:3.5,c:7,  f:1.5, type:"light"   },
+    { name:"Biscotti (3)",              kcal:150, p:2,  c:23, f:6,   type:"carb"    },
+    { name:"Muesli (50g)",              kcal:190, p:5,  c:34, f:4,   type:"carb"    },
+    { name:"Granola (50g)",             kcal:220, p:5,  c:35, f:7,   type:"carb"    },
+    { name:"Nutella (20g)",             kcal:110, p:1.4,c:12, f:6.5, type:"fat"     },
+    { name:"Marmellata (20g)",          kcal:50,  p:0.2,c:13, f:0,   type:"carb"    },
+    { name:"Burro di arachidi (20g)",   kcal:120, p:5,  c:4,  f:10,  type:"fat"     },
+    { name:"Barretta proteica",         kcal:200, p:20, c:20, f:5,   type:"protein" },
+    { name:"Barretta cioccolato",       kcal:160, p:2,  c:18, f:9,   type:"fat"     },
+    { name:"Cioccolato fondente (30g)", kcal:170, p:2.5,c:18, f:10,  type:"fat"     },
+    { name:"Gelato (1 pallina)",        kcal:130, p:2,  c:18, f:6,   type:"fat"     },
+    { name:"Patatine (30g)",            kcal:163, p:2,  c:15, f:11,  type:"fat"     },
+    { name:"Frutta secca (30g)",        kcal:180, p:5,  c:6,  f:16,  type:"fat"     },
+    { name:"Pistacchi (30g)",           kcal:175, p:6,  c:8,  f:14,  type:"fat"     },
+    { name:"Mandorle (30g)",            kcal:175, p:6,  c:6,  f:15,  type:"fat"     },
+    { name:"Rice cake (2 pz)",          kcal:70,  p:1.5,c:15, f:0.5, type:"carb"    },
+    { name:"Torta di mele (fetta)",     kcal:280, p:4,  c:42, f:11,  type:"carb"    },
+    { name:"Tiramisù (porzione)",       kcal:380, p:7,  c:38, f:22,  type:"fat"     },
+    { name:"Panna cotta",               kcal:220, p:3,  c:25, f:12,  type:"fat"     },
+    { name:"Pancake (2)",               kcal:220, p:6,  c:34, f:7,   type:"carb"    },
+    { name:"Porridge alla frutta",      kcal:230, p:7,  c:38, f:5,   type:"carb"    },
+  ],
+  "Bevande": [
+    { name:"Acqua",                     kcal:0,   p:0,  c:0,  f:0,   type:"light"   },
+    { name:"Acqua frizzante",           kcal:0,   p:0,  c:0,  f:0,   type:"light"   },
+    { name:"Succo arancia (200ml)",     kcal:90,  p:1,  c:22, f:0,   type:"carb"    },
+    { name:"Succo mela (200ml)",        kcal:96,  p:0.3,c:24, f:0,   type:"carb"    },
+    { name:"Smoothie frutta (200ml)",   kcal:120, p:1,  c:28, f:0.5, type:"carb"    },
+    { name:"Coca Cola (330ml)",         kcal:139, p:0,  c:35, f:0,   type:"carb"    },
+    { name:"Coca Cola Zero (330ml)",    kcal:1,   p:0,  c:0,  f:0,   type:"light"   },
+    { name:"Aranciata (330ml)",         kcal:130, p:0,  c:33, f:0,   type:"carb"    },
+    { name:"Birra (330ml)",             kcal:143, p:1,  c:13, f:0,   type:"carb"    },
+    { name:"Birra artigianale (330ml)", kcal:180, p:2,  c:18, f:0,   type:"carb"    },
+    { name:"Vino rosso (150ml)",        kcal:127, p:0.1,c:4,  f:0,   type:"light"   },
+    { name:"Vino bianco (150ml)",       kcal:121, p:0.1,c:3.5,f:0,   type:"light"   },
+    { name:"Prosecco (150ml)",          kcal:108, p:0.3,c:3,  f:0,   type:"light"   },
+    { name:"Lambrusco (150ml)",         kcal:90,  p:0.1,c:5,  f:0,   type:"light"   },
+    { name:"Spritz (200ml)",            kcal:120, p:0,  c:8,  f:0,   type:"light"   },
+    { name:"Latte di avena (200ml)",    kcal:90,  p:2,  c:16, f:2,   type:"carb"    },
+    { name:"Latte di soia (200ml)",     kcal:80,  p:6,  c:7,  f:3,   type:"protein" },
+    { name:"Latte di mandorla (200ml)", kcal:50,  p:1,  c:7,  f:2,   type:"light"   },
+    { name:"Protein shake (300ml)",     kcal:180, p:30, c:8,  f:3,   type:"protein" },
+    { name:"Chinotto (330ml)",          kcal:120, p:0,  c:30, f:0,   type:"carb"    },
+  ],
+};
+
+export const ALL_FOODS = Object.entries(FOOD_DB).flatMap(([cat,items]) =>
+  items.map(f => ({ ...f, _cat: cat }))
+);
+
+// ─── STORAGE ──────────────────────────────────────────────────────────────────
+function load(k,fb){ try{ const v=localStorage.getItem(k); return v!==null?JSON.parse(v):fb; }catch{ return fb; } }
+function save(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch{} }
+function todayKey(){ return new Date().toISOString().split("T")[0]; }
+
+// ─── MOOD SYSTEM (stati intermedi, v1.4) ──────────────────────────────────────
+// Il mood non scatta da uno stato all'altro in un colpo solo. MOOD_ORDER
+// definisce una scala continua; ad ogni aggiornamento dello stato (decay
+// periodico o pasto) calcoliamo il mood "target" in base alle statistiche
+// attuali, ma il mood effettivamente mostrato si sposta di un solo gradino
+// per volta verso il target.
+export const MOOD_ORDER = ["sad", "neutral", "content", "happy", "excited"];
+
+function computeTargetMoodIndex(hunger, energy, happiness) {
+  if (hunger > 75 || happiness < 25 || energy < 25) return 0; // sad
+  if (hunger < 25 && energy > 60 && happiness > 70) return 4; // excited
+  if (hunger < 40 && energy > 45 && happiness > 55) return 3; // happy
+  if (hunger < 55 && energy > 35 && happiness > 40) return 2; // content
+  return 1; // neutral
+}
+
+// Sposta l'indice corrente di un solo passo verso il target (mai di scatto)
+function stepMoodIndex(currentIndex, targetIndex) {
+  if (currentIndex == null) return targetIndex;
+  if (currentIndex === targetIndex) return currentIndex;
+  return currentIndex + Math.sign(targetIndex - currentIndex);
+}
+
+// ─── NUTRIZIONE ────────────────────────────────────────────────────────────────
+// Stima qualità pasto 0-1 basata su bilanciamento macro (non solo calorie)
+function mealQuality(food) {
+  const p = food.p||0, c = food.c||0, f = food.f||0;
+  const tot = p+c+f;
+  if (tot === 0) return 0.5;
+  const pRatio = p/tot;
+  let q = 0.45 + pRatio*0.4;
+  if (f/tot > 0.55) q -= 0.15;
+  return Math.max(0.2, Math.min(1, q));
+}
+
+function getFoodEffect(food) {
+  const quality = mealQuality(food);
+  const happinessDelta = Math.round(8 + quality*12); // 8-20
+  switch(food.type) {
+    case "protein": return { hungerDelta:-35, energyDelta:+20, happinessDelta, label:"Energia stabile!"   , reaction:"energetic" };
+    case "carb":    return { hungerDelta:-30, energyDelta:+30, happinessDelta, label:"Carica subito!"     , reaction:"energetic" };
+    case "fat":     return { hungerDelta:-25, energyDelta:+10, happinessDelta, label:"Sazio e calmo!"     , reaction:"neutral"   };
+    case "light":   return { hungerDelta:-15, energyDelta:+8,  happinessDelta, label:"Leggero e fresco!"  , reaction:"happy"     };
+    default:        return { hungerDelta:-20, energyDelta:+15, happinessDelta, label:"Buono!"             , reaction:"happy"     };
+  }
+}
+
+// Somma kcal/p/c/f di una lista di alimenti — usata sia per i totali
+// giornalieri sia per i totali del builder di ricette (v1.4.1: prima erano
+// due reduce duplicati, ora un'unica funzione condivisa).
+export function sumMacros(items) {
+  return {
+    kcal: items.reduce((s,i)=>s+(i.kcal||0),0),
+    p:    items.reduce((s,i)=>s+(i.p||0),0),
+    c:    items.reduce((s,i)=>s+(i.c||0),0),
+    f:    items.reduce((s,i)=>s+(i.f||0),0),
+  };
+}
+
+// ─── DIALOGHI & MEMORIA (v1.4) ────────────────────────────────────────────────
+const REACTION_MESSAGES = {
+  happy:     ["Che buono!", "Mi piace!", "Delizioso!", "{food}? Sì grazie!", "Che bontà questo {food}!", "Yum!", "Mi fa sempre piacere!"],
+  energetic: ["Che carica!", "Sento l'energia!", "Forza pura!", "{food} è proprio quello che ci voleva!", "Ora sì che si corre!", "Che sprint!"],
+  neutral:   ["Mmh, ok.", "Va bene così.", "Non male.", "Ci sta.", "Va giù bene."],
+  sad:       ["Avrei voluto di meglio...", "Speravo in altro."],
+  relieved:  ["Finalmente! Che sollievo 😌", "Aspettavo proprio questo momento!", "Ah, ora va molto meglio.", "Grazie, ne avevo davvero bisogno.", "{food}, giusto in tempo!"],
+};
+function pickReaction(type, foodName) {
+  const arr = REACTION_MESSAGES[type] || REACTION_MESSAGES.neutral;
+  const msg = arr[Math.floor(Math.random()*arr.length)];
+  return foodName ? msg.replace("{food}", foodName) : msg.replace("{food} ","").replace("{food}","Buono");
+}
+
+// Quante volte un dato alimento è stato mangiato negli ultimi 7 giorni
+// (oggi incluso). Usata per frasi tipo "È il terzo yogurt questa settimana!".
+function getFoodMemoryCount(dailyLog, foodName) {
+  let count = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(); d.setDate(d.getDate()-i);
+    const key = d.toISOString().split("T")[0];
+    const meals = dailyLog[key]?.meals || [];
+    count += meals.filter(m => m.name === foodName).length;
+  }
+  return count;
+}
+
+// Ordinale italiano semplice per i numeri più comuni in questo contesto
+function ordinalIt(n) {
+  const words = { 1:"il primo", 2:"il secondo", 3:"il terzo", 4:"il quarto", 5:"il quinto", 6:"il sesto", 7:"il settimo" };
+  return words[n] || `il numero ${n}`;
+}
+
+// Routine di un tipo di pasto: media oraria negli ultimi 14 giorni (esclusi
+// oggi), solo se ci sono abbastanza dati per parlare davvero di "abitudine".
+function getMealRoutine(dailyLog, mealType) {
+  const hours = [];
+  for (let i = 1; i <= 14; i++) {
+    const d = new Date(); d.setDate(d.getDate()-i);
+    const key = d.toISOString().split("T")[0];
+    const meals = dailyLog[key]?.meals || [];
+    meals.filter(m => m.meal === mealType).forEach(m => {
+      const h = parseInt((m.time||"").split(":")[0], 10);
+      if (!isNaN(h)) hours.push(h);
+    });
+  }
+  if (hours.length < 3) return null;
+  const avgHour = Math.round(hours.reduce((a,b)=>a+b,0)/hours.length);
+  return { avgHour, samples: hours.length };
+}
+
+// Selezione pesata generica: array di { weight, ...resto }
+function weightedPick(candidates) {
+  const total = candidates.reduce((s,c)=>s+c.weight, 0);
+  let r = Math.random()*total;
+  for (const c of candidates) {
+    if (r < c.weight) return c;
+    r -= c.weight;
+  }
+  return candidates[candidates.length-1];
+}
+
+// Compone la reazione al pasto: se c'è un fatto reale interessante (memoria
+// settimanale, routine oraria, attesa lunga) ha buone probabilità di essere
+// scelto al posto della frase generica.
+function composeMealReaction({ reactionType, foodName, dailyLog, mealType, waitedLong }) {
+  const candidates = [{ weight:6, text: pickReaction(reactionType, foodName) }]; // sempre disponibile
+
+  if (waitedLong) {
+    candidates.push({ weight:5, text: pickReaction("relieved", foodName) });
+  }
+
+  const memoryCount = getFoodMemoryCount(dailyLog, foodName);
+  if (memoryCount >= 3) {
+    candidates.push({ weight:4, text: `È ${ordinalIt(memoryCount)} ${foodName} questa settimana!` });
+  }
+
+  const routine = getMealRoutine(dailyLog, mealType);
+  if (routine) {
+    const currentHour = new Date().getHours();
+    const diff = Math.abs(currentHour - routine.avgHour);
+    if (diff <= 1) {
+      candidates.push({ weight:3, text: `Puntuale come sempre, ${mealType.toLowerCase()} verso le ${routine.avgHour}!` });
+    } else if (diff >= 3) {
+      candidates.push({ weight:2, text: `Oggi ${mealType.toLowerCase()} un po' fuori dai tuoi orari soliti, va benissimo comunque!` });
+    }
+  }
+
+  return weightedPick(candidates).text;
+}
+
+// Frasi affettuose e mai giudicanti, scelte in base alla situazione reale della
+// giornata. Priorità: bisogni fisici > memoria pasti di oggi > memoria
+// settimanale > routine > stato emotivo generico. Nessun Math.random() qui
+// dentro di proposito: la caption deve restare stabile tra un render e
+// l'altro finché lo stato reale non cambia davvero.
+function getContextualMessage(ctx) {
+  const { hoursSinceLastFed, water, targetWater, totalP, mealsCount, totalKcal, gKcal, mood, foxName, dailyLog, todayMeals } = ctx;
+
+  if (hoursSinceLastFed != null && hoursSinceLastFed >= 5) {
+    return "È da tanto che non mangiamo... quando vuoi io ci sono!";
+  }
+  if (water < targetWater * 0.4 && mealsCount > 0) {
+    return "Ho un po' sete... un bicchiere d'acqua? 💧";
+  }
+  if (totalP < 20 && mealsCount >= 2) {
+    return "Oggi ci servirebbe un po' più di forza, che ne dici di qualcosa di proteico?";
+  }
+  if (mealsCount === 3) {
+    return "Questo è il terzo pasto di oggi, stiamo andando alla grande!";
+  }
+  if (dailyLog && todayMeals && todayMeals.length > 0) {
+    const frequent = todayMeals
+      .map(m => ({ name:m.name, count:getFoodMemoryCount(dailyLog, m.name) }))
+      .find(f => f.count >= 3);
+    if (frequent) {
+      return `È ${ordinalIt(frequent.count)} ${frequent.name} questa settimana — ti piace davvero! 🦊`;
+    }
+  }
+  if (water >= targetWater && mealsCount > 0) {
+    return "Hai già bevuto abbastanza, bravissimo!";
+  }
+  if (totalKcal > 0 && totalKcal <= gKcal && mealsCount >= 2) {
+    return "Stai rispettando il tuo obiettivo, sono fiera di te!";
+  }
+  if (mealsCount === 0 && dailyLog && new Date().getHours() < 11) {
+    const routine = getMealRoutine(dailyLog, "Colazione");
+    if (routine) return `Di solito fai colazione verso le ${routine.avgHour}, ti aspetto! 🦊`;
+  }
+  if (mood === "excited") {
+    return "Mi sento davvero bene oggi! ✨";
+  }
+  if (mood === "happy") {
+    return "Che bella giornata insieme!";
+  }
+  if (mood === "content") {
+    return "Tutto tranquillo, mi sento serena.";
+  }
+  if (mood === "sad") {
+    return "Un po' giù di energie... ma so che ci riprendiamo!";
+  }
+  if (mealsCount === 0) {
+    return `Ehi, sono ${foxName}! Pronta quando vuoi iniziare la giornata 🦊`;
+  }
+  return "Sono curiosa di scoprire cosa mangiamo oggi!";
+}
+
+// ─── PROGRESSIONE & OBIETTIVI ──────────────────────────────────────────────────
+function getStreak(log) {
+  let s=0; const today=new Date();
+  for(let i=0;i<60;i++){
+    const d=new Date(today); d.setDate(today.getDate()-i);
+    const k=d.toISOString().split("T")[0];
+    if(log[k]?.meals?.length>0) s++;
+    else if(i>0) break;
+  }
+  return s;
+}
+
+function calcBMR(w,h,a,sex){
+  if(!w||!h||!a) return 2000;
+  return sex==="M"?Math.round(10*w+6.25*h-5*a+5):Math.round(10*w+6.25*h-5*a-161);
+}
+function calcTDEE(bmr,act){
+  const f={sedentario:1.2,leggero:1.375,moderato:1.55,attivo:1.725};
+  return Math.round(bmr*(f[act]||1.375));
+}
+export const GOALS={
+  perdere_peso:    {label:"Perdere peso",   emoji:"📉", mult:0.8},
+  mangiare_meglio: {label:"Mangiare meglio",emoji:"🥗", mult:1.0},
+  tener_traccia:   {label:"Tener traccia",  emoji:"📋", mult:1.1},
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HOOK PRINCIPALE — tutto lo stato persistito, le derivazioni e le azioni.
+// App.jsx chiama questo hook una volta e usa l'oggetto restituito per il
+// rendering; non contiene più alcuna logica di business propria.
+// ─────────────────────────────────────────────────────────────────────────────
+export function useNutriFox() {
+  const [setupDone, setSetupDone] = useState(()=>load("nf_setupDone",false));
+  const [foxName,   setFoxName]   = useState(()=>load("nf_foxName","Foxy"));
+  const [goalKey,   setGoalKey]   = useState(()=>load("nf_goalKey","mangiare_meglio"));
+  const [profile,   setProfile]   = useState(()=>load("nf_profile",{weight:"",height:"",age:"",sex:"M",activity:"leggero"}));
+  const [dailyLog,  setDailyLog]  = useState(()=>load("nf_dailyLog",{}));
+  const [favorites, setFavorites] = useState(()=>load("nf_favorites",[]));
+  const [recentFoods,setRecentFoods]=useState(()=>load("nf_recent",[]));
+  const [customRecipes,setCustomRecipes]=useState(()=>load("nf_recipes",[]));
+  const [water,     setWater]     = useState(()=>load("nf_water_"+todayKey(),0));
+  const [aiMessages,setAiMessages]= useState(()=>load("nf_aimsg",[]));
+  const [aiInput,   setAiInput]   = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const chatEndRef = useRef(null);
+
+  // Fox state — happiness, health, lastFedAt, moodIndex (stati intermedi v1.4)
+  const [foxState,  setFoxState]  = useState(()=>load("nf_foxstate",{hunger:50,energy:50,happiness:70,health:90,lastFedAt:null,moodIndex:1}));
+  const [bounce,    setBounce]    = useState(false);
+  const [feedLabel, setFeedLabel] = useState("");
+  const [reaction,  setReaction]  = useState(null); // {type, message} — popup temporaneo 2-3s
+  const [reward,    setReward]    = useState(null); // {icon} — effetto ricompensa <2s (streak/acqua/obiettivo)
+  const [licking,   setLicking]   = useState(false); // si lecca i baffi subito dopo il pasto
+  const [celebratedToday, setCelebratedToday] = useState(()=>load("nf_celebrated_"+todayKey(),{}));
+
+  // Persist
+  useEffect(()=>save("nf_setupDone",setupDone),[setupDone]);
+  useEffect(()=>save("nf_foxName",foxName),[foxName]);
+  useEffect(()=>save("nf_goalKey",goalKey),[goalKey]);
+  useEffect(()=>save("nf_profile",profile),[profile]);
+  useEffect(()=>save("nf_dailyLog",dailyLog),[dailyLog]);
+  useEffect(()=>save("nf_favorites",favorites),[favorites]);
+  useEffect(()=>save("nf_recent",recentFoods),[recentFoods]);
+  useEffect(()=>save("nf_recipes",customRecipes),[customRecipes]);
+  useEffect(()=>save("nf_water_"+todayKey(),water),[water]);
+  useEffect(()=>save("nf_foxstate",foxState),[foxState]);
+  useEffect(()=>save("nf_aimsg",aiMessages.slice(-40)),[aiMessages]);
+  useEffect(()=>{ chatEndRef.current?.scrollIntoView({behavior:"smooth"}); },[aiMessages]);
+  useEffect(()=>save("nf_celebrated_"+todayKey(),celebratedToday),[celebratedToday]);
+
+  // Decay system leggero: ogni minuto hunger sale, energy scende.
+  // moodIndex avanza di un solo gradino per tick verso il mood "target".
+  useEffect(()=>{
+    const iv = setInterval(()=>{
+      setFoxState(prev=>{
+        const hunger    = Math.min(100, prev.hunger+2);
+        const energy    = Math.max(0, prev.energy-1);
+        const happiness = hunger > 70 ? Math.max(0, (prev.happiness??70)-2) : (prev.happiness??70);
+        const health    = happiness < 30 ? Math.max(0, (prev.health??90)-1) : (prev.health??90);
+        const target     = computeTargetMoodIndex(hunger, energy, happiness);
+        const moodIndex  = stepMoodIndex(prev.moodIndex, target);
+        return { ...prev, hunger, energy, happiness, health, moodIndex };
+      });
+    }, 60000); // ogni minuto
+    return ()=>clearInterval(iv);
+  },[]);
+
+  const today    = todayKey();
+  const todayData= dailyLog[today]||{meals:[]};
+  const streak   = getStreak(dailyLog);
+  const stage    = getFoxStage(streak);
+  const mood     = MOOD_ORDER[foxState.moodIndex ?? computeTargetMoodIndex(foxState.hunger, foxState.energy, foxState.happiness??70)];
+
+  function goalKcal(){
+    const bmr=calcBMR(Number(profile.weight),Number(profile.height),Number(profile.age),profile.sex);
+    const tdee=calcTDEE(bmr,profile.activity);
+    const mult=GOALS[goalKey]?.mult||1;
+    return profile.weight?Math.round(tdee*mult):(goalKey==="perdere_peso"?1600:goalKey==="tener_traccia"?2200:2000);
+  }
+
+  const todayTotals = sumMacros(todayData.meals);
+  const totalKcal = todayTotals.kcal, totalP = todayTotals.p, totalC = todayTotals.c, totalF = todayTotals.f;
+  const gKcal     = goalKcal();
+  const targetWater = Math.round(((Number(profile.weight)||70)*35+(totalKcal/1000)*300)/250);
+
+  const weekDays = Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-i);return d.toISOString().split("T")[0];});
+  const weekKcals= weekDays.map(d=>sumMacros(dailyLog[d]?.meals||[]).kcal);
+  const weekAvg  = Math.round(weekKcals.filter(k=>k>0).reduce((s,k)=>s+k,0)/(weekKcals.filter(k=>k>0).length||1));
+
+  const hoursSinceLastFed = foxState.lastFedAt ? (Date.now()-foxState.lastFedAt)/3600000 : null;
+
+  const contextualMessage = getContextualMessage({
+    hoursSinceLastFed, water, targetWater, totalP, mealsCount:todayData.meals.length,
+    totalKcal, gKcal, mood, foxName, dailyLog, todayMeals:todayData.meals,
+  });
+
+  // Effetti di ricompensa: si attivano una sola volta per evento al giorno.
+  useEffect(()=>{
+    if (todayData.meals.length>0 && totalKcal<=gKcal && totalKcal>=gKcal*0.85 && !celebratedToday.goal) {
+      setReward({icon:"🎯"});
+      setCelebratedToday(p=>({...p,goal:true}));
+      setTimeout(()=>setReward(null),1800);
+    }
+  },[totalKcal,gKcal]);
+
+  useEffect(()=>{
+    if (water>=targetWater && targetWater>0 && !celebratedToday.water) {
+      setReward({icon:"💧"});
+      setCelebratedToday(p=>({...p,water:true}));
+      setTimeout(()=>setReward(null),1800);
+    }
+  },[water,targetWater]);
+
+  useEffect(()=>{
+    if (streak>0 && streak%7===0 && !celebratedToday["streak"+streak]) {
+      setReward({icon:"🔥"});
+      setCelebratedToday(p=>({...p,["streak"+streak]:true}));
+      setTimeout(()=>setReward(null),1800);
+    }
+  },[streak]);
+
+  // Food lists
+  const categories=["Recenti","Preferiti","Tutti",...Object.keys(FOOD_DB)];
+  function getPool(cat){
+    if(cat==="Recenti") return recentFoods.slice(0,12);
+    if(cat==="Preferiti") return ALL_FOODS.filter(f=>favorites.includes(f.name));
+    if(cat==="Tutti") return ALL_FOODS;
+    return FOOD_DB[cat]||[];
+  }
+
+  function toggleFavorite(name){
+    setFavorites(prev => prev.includes(name) ? prev.filter(n=>n!==name) : [...prev, name]);
+  }
+
+  async function askFox(userMsg) {
+    if(!userMsg.trim()||aiLoading) return;
+    const userEntry = {role:"user", content:userMsg};
+    setAiMessages(prev=>[...prev, userEntry]);
+    setAiInput("");
+    setAiLoading(true);
+
+    const meals = todayData.meals.map(m=>`${m.name} (${m.kcal} kcal, P:${m.p}g C:${m.c}g G:${m.f}g)`).join(", ");
+    const profile_str = profile.weight ? `Peso: ${profile.weight}kg, Altezza: ${profile.height}cm, Eta: ${profile.age}anni, Sesso: ${profile.sex}, Attivita: ${profile.activity}` : "Profilo non inserito";
+    const systemPrompt = `Sei ${foxName}, una volpe simpatica e affettuosa che aiuta l'utente a mangiare meglio. Parli in italiano, in prima persona, con calore e un pizzico di umorismo da volpe. Sei concisa (max 3 frasi). Non sei un medico.
+
+Dati oggi:
+- Pasti: ${meals||"nessuno ancora"}
+- Calorie: ${totalKcal}/${gKcal} kcal
+- Proteine: ${Math.round(totalP)}g, Carboidrati: ${Math.round(totalC)}g, Grassi: ${Math.round(totalF)}g
+- Acqua: ${water}/${targetWater} bicchieri
+- Streak: ${streak} giorni
+- Tuo stato: Fame ${Math.round(foxState.hunger)}%, Energia ${Math.round(foxState.energy)}%
+- Profilo: ${profile_str}
+- Obiettivo: ${GOALS[goalKey].label}
+
+Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai mangiato molto, incoraggialo. Se hai esagerato, dillo con gentilezza.`;
+
+    try {
+      const history = aiMessages.slice(-10).map(m=>({role:m.role,content:m.content}));
+      const res = await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-6",
+          max_tokens:300,
+          system:systemPrompt,
+          messages:[...history,{role:"user",content:userMsg}]
+        })
+      });
+      const data = await res.json();
+      const reply = data.content?.[0]?.text || "Uhm... non riesco a rispondere ora!";
+      setAiMessages(prev=>[...prev,{role:"assistant",content:reply}]);
+      setBounce(true); setTimeout(()=>setBounce(false),600);
+    } catch(err) {
+      setAiMessages(prev=>[...prev,{role:"assistant",content:"Ops, ho avuto un problema! Riprova tra poco."}]);
+    }
+    setAiLoading(false);
+  }
+
+  function triggerBounce(label){
+    setBounce(true); setFeedLabel(label);
+    setTimeout(()=>setBounce(false),600);
+    setTimeout(()=>setFeedLabel(""),2000);
+  }
+
+  function triggerReaction(type, message){
+    setReaction({ type, message });
+    setTimeout(()=>setReaction(null), 2500);
+  }
+
+  // Aggiunge un alimento al log di oggi e fa reagire la volpe. Non tocca
+  // navigazione o stato dei form: quello resta responsabilità di App.jsx.
+  function addFood(food, mealType){
+    const effect=getFoodEffect(food);
+    const waitedLong = hoursSinceLastFed != null && hoursSinceLastFed >= 5;
+    const reactionType = waitedLong ? "relieved" : effect.reaction;
+    const message = composeMealReaction({
+      reactionType, foodName:food.name, dailyLog, mealType, waitedLong,
+    });
+    setFoxState(prev=>{
+      const hunger    = Math.max(0,prev.hunger+effect.hungerDelta);
+      const energy    = Math.min(100,prev.energy+effect.energyDelta);
+      const happiness = Math.min(100,(prev.happiness??70)+effect.happinessDelta);
+      const target    = computeTargetMoodIndex(hunger, energy, happiness);
+      const moodIndex = stepMoodIndex(prev.moodIndex, target);
+      return { ...prev, hunger, energy, happiness, lastFedAt:Date.now(), moodIndex };
+    });
+    triggerBounce(effect.label);
+    triggerReaction(reactionType, message);
+    setLicking(true);
+    setTimeout(()=>setLicking(false), 900);
+    const entry={...food,meal:mealType,time:new Date().toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"})};
+    setDailyLog(prev=>({...prev,[today]:{meals:[...(prev[today]?.meals||[]),entry]}}));
+    setRecentFoods(prev=>[food,...prev.filter(f=>f.name!==food.name)].slice(0,20));
+  }
+
+  // Ritorna true/false in base al successo, così App.jsx sa se resettare il
+  // form e navigare (stesso comportamento della v1.4, solo riorganizzato).
+  function addCustomFood(fields, mealType){
+    if(!fields.name||!fields.kcal) return false;
+    addFood({name:fields.name,kcal:Number(fields.kcal),p:Number(fields.p)||0,c:Number(fields.c)||0,f:Number(fields.f)||0,type:"carb"}, mealType);
+    return true;
+  }
+
+  function removeFood(idx){
+    setDailyLog(prev=>{const meals=[...(prev[today]?.meals||[])];meals.splice(idx,1);return{...prev,[today]:{meals}};});
+  }
+
+  function saveRecipe(name, ingredients){
+    if(!name||ingredients.length===0) return false;
+    const totals = sumMacros(ingredients);
+    setCustomRecipes(prev=>[...prev,{name,kcal:Math.round(totals.kcal),p:Math.round(totals.p),c:Math.round(totals.c),f:Math.round(totals.f),ingredients,type:"carb"}]);
+    return true;
+  }
+
+  return {
+    // profilo & setup
+    setupDone, setSetupDone, foxName, setFoxName, goalKey, setGoalKey, profile, setProfile,
+    // dati persistiti letti direttamente dalla UI
+    dailyLog, favorites, customRecipes, water, setWater,
+    // coach AI
+    aiMessages, aiInput, setAiInput, aiLoading, askFox, chatEndRef,
+    // stato volpe
+    foxState, bounce, feedLabel, reaction, reward, licking,
+    // derivazioni
+    today, todayData, streak, stage, mood, contextualMessage,
+    totalKcal, totalP, totalC, totalF, gKcal, targetWater, weekAvg,
+    // alimenti
+    categories, getPool, FOOD_DB, ALL_FOODS,
+    // azioni
+    addFood, addCustomFood, removeFood, saveRecipe, toggleFavorite,
+  };
+}
