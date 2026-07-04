@@ -58,8 +58,8 @@ export function getAnimationIntent(mood) {
   if (mood === "sleeping") return "sleepy";
   if (mood === "drowsy") return "drowsy";
   if (mood === "sad") return "alert";
-  if (mood === "excited") return "playful";
-  return "idle";
+  if (mood === "excited" || mood === "proud") return "playful";
+  return "idle"; // include "curious": tranquilla ma sveglia, coerente con l'idea di notare qualcosa
 }
 
 function pickWeightedEvent(weights) {
