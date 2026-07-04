@@ -49,15 +49,28 @@ function deriveColors(streak) {
 // v1.4: aggiunto "content" — stato intermedio tra "neutral" e "happy", usato
 // dal sistema di mood graduale (moodIndex) in App.jsx quando la volpe sta
 // migliorando ma non è ancora del tutto "happy".
+// v1.8: aggiunti "proud" e "curious" — non fanno parte della scala graduale
+// (MOOD_ORDER), sono stati "speciali" che il motore decisionale (v1.7) può
+// richiedere temporaneamente mentre un messaggio di riconoscimento o di
+// riflessione è attivo (vedi specialEmotion in useNutriFox.js). Due nuovi
+// campi su ogni espressione: browAsymmetry (sopracciglio destro più alto,
+// usato da "curious") e badge (icona breve accanto alla testa, come lo "zzz"
+// già esistente per il sonno).
 const MOOD_EXPR = {
-  happy:   { bY:-3, bCurve:6,  mouth:"M 46 65 Q 52 72 58 65", eH:0.62, open:true,  cheeksUp:true,  mouthFill:true,  mouthFillOpacity:0.18, sparkleBrows:false, earMood:"relaxed", sleepy:false },
-  excited: { bY:-6, bCurve:9,  mouth:"M 43 64 Q 52 76 61 64", eH:1.12, open:true,  cheeksUp:true,  mouthFill:true,  mouthFillOpacity:0.22, sparkleBrows:true,  earMood:"up",      sleepy:false },
-  content: { bY:-1, bCurve:3,  mouth:"M 46 66 Q 52 71 58 66", eH:0.85, open:true,  cheeksUp:false, mouthFill:true,  mouthFillOpacity:0.10, sparkleBrows:false, earMood:"relaxed", sleepy:false },
-  neutral: { bY:0,  bCurve:1,  mouth:"M 46 67 Q 52 70 58 67", eH:1.0,  open:true,  cheeksUp:false, mouthFill:false, mouthFillOpacity:0,    sparkleBrows:false, earMood:"up",      sleepy:false },
-  sad:     { bY:4,  bCurve:-5, mouth:"M 46 71 Q 52 65 58 71", eH:0.88, open:true,  cheeksUp:false, mouthFill:false, mouthFillOpacity:0,    sparkleBrows:false, earMood:"down",    sleepy:false },
+  happy:   { bY:-3, bCurve:6,  mouth:"M 46 65 Q 52 72 58 65", eH:0.62, open:true,  cheeksUp:true,  mouthFill:true,  mouthFillOpacity:0.18, sparkleBrows:false, earMood:"relaxed", sleepy:false, browAsymmetry:0, badge:null },
+  excited: { bY:-6, bCurve:9,  mouth:"M 43 64 Q 52 76 61 64", eH:1.12, open:true,  cheeksUp:true,  mouthFill:true,  mouthFillOpacity:0.22, sparkleBrows:true,  earMood:"up",      sleepy:false, browAsymmetry:0, badge:null },
+  content: { bY:-1, bCurve:3,  mouth:"M 46 66 Q 52 71 58 66", eH:0.85, open:true,  cheeksUp:false, mouthFill:true,  mouthFillOpacity:0.10, sparkleBrows:false, earMood:"relaxed", sleepy:false, browAsymmetry:0, badge:null },
+  neutral: { bY:0,  bCurve:1,  mouth:"M 46 67 Q 52 70 58 67", eH:1.0,  open:true,  cheeksUp:false, mouthFill:false, mouthFillOpacity:0,    sparkleBrows:false, earMood:"up",      sleepy:false, browAsymmetry:0, badge:null },
+  sad:     { bY:4,  bCurve:-5, mouth:"M 46 71 Q 52 65 58 71", eH:0.88, open:true,  cheeksUp:false, mouthFill:false, mouthFillOpacity:0,    sparkleBrows:false, earMood:"down",    sleepy:false, browAsymmetry:0, badge:null },
+  // proud: riconoscimento/traguardo (streak, obiettivo, ricompensa) — sorriso
+  // sicuro, testa un filo più alta, un piccolo badge a stella accanto alla testa.
+  proud:   { bY:-4, bCurve:7,  mouth:"M 44 65 Q 52 73 60 65", eH:0.68, open:true,  cheeksUp:true,  mouthFill:true,  mouthFillOpacity:0.20, sparkleBrows:true,  earMood:"up",      sleepy:false, browAsymmetry:0, badge:"star" },
+  // curious: nota qualcosa o invita a riflettere — un sopracciglio alzato,
+  // occhi un po' più aperti, piccolo punto interrogativo accanto alla testa.
+  curious: { bY:0,  bCurve:2,  mouth:"M 47 68 Q 52 69 57 68", eH:1.08, open:true,  cheeksUp:false, mouthFill:false, mouthFillOpacity:0,    sparkleBrows:false, earMood:"up",      sleepy:false, browAsymmetry:6, badge:"question" },
   // drowsy: pose "lying" (2-4h senza mangiare) — occhi socchiusi, non ancora chiusi del tutto
-  drowsy:  { bY:2,  bCurve:-1, mouth:"M 46 68 Q 52 70 58 68", eH:0.32, open:true,  cheeksUp:false, mouthFill:false, mouthFillOpacity:0,    sparkleBrows:false, earMood:"down",    sleepy:false },
-  sleeping:{ bY:0,  bCurve:0,  mouth:"M 46 67 Q 52 70 58 67", eH:0,    open:false, cheeksUp:false, mouthFill:false, mouthFillOpacity:0,    sparkleBrows:false, earMood:"relaxed", sleepy:true  },
+  drowsy:  { bY:2,  bCurve:-1, mouth:"M 46 68 Q 52 70 58 68", eH:0.32, open:true,  cheeksUp:false, mouthFill:false, mouthFillOpacity:0,    sparkleBrows:false, earMood:"down",    sleepy:false, browAsymmetry:0, badge:null },
+  sleeping:{ bY:0,  bCurve:0,  mouth:"M 46 67 Q 52 70 58 67", eH:0,    open:false, cheeksUp:false, mouthFill:false, mouthFillOpacity:0,    sparkleBrows:false, earMood:"relaxed", sleepy:true,  browAsymmetry:0, badge:null },
 };
 
 const EAR_ANGLES = {
@@ -91,11 +104,16 @@ export function deriveVisualState({ mood, lastFedAt }) {
 }
 
 // ─── HOOK PRINCIPALE ─────────────────────────────────────────────────────────
-export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch }) {
+// v1.8: il visualMood finale (che ora può includere un'emozione speciale come
+// "proud"/"curious" richiesta dal motore decisionale) viene risolto una sola
+// volta in Fox.jsx e passato qui come resolvedVisualMood — questo hook non lo
+// ricalcola più da solo, usa deriveVisualState solo per pose/hoursSinceLastFed.
+export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood }) {
   return useMemo(() => {
     const stage               = deriveStage(streak);
     const colors               = deriveColors(streak);
-    const { pose, visualMood, hoursSinceLastFed } = deriveVisualState({ mood, lastFedAt });
+    const { pose, hoursSinceLastFed } = deriveVisualState({ mood, lastFedAt });
+    const visualMood          = resolvedVisualMood;
     const poseTransform       = poseToTransform(pose);
     const intent              = getAnimationIntent(visualMood);
     const ex                  = MOOD_EXPR[visualMood] || MOOD_EXPR.neutral;
@@ -110,13 +128,14 @@ export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, ear
 
     // Animazione corpo — ora segue la pose reale, non solo il mood emotivo
     // v1.4: "stretch" (si stiracchia) ha priorità subito dopo bounce/hop
+    // v1.8: "proud" riusa l'animazione excited (stesso brio, espressione diversa)
     const bodyAnim = bounce       ? "fox-bounce"
       : hop                       ? "fox-hop"
       : stretch                   ? "fox-stretch"
       : pose === "asleep"         ? "fox-breathe"
       : pose === "lying"          ? "fox-drowsy"
       : visualMood === "sad"      ? "fox-sad"
-      : visualMood === "excited"  ? "fox-excited"
+      : (visualMood === "excited" || visualMood === "proud") ? "fox-excited"
       : "fox-idle";
 
     // Velocità coda: dipende da intent
@@ -133,6 +152,6 @@ export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, ear
       // metadati
       pose, visualMood, intent, hoursSinceLastFed,
     };
-  }, [mood, streak, lastFedAt, bounce, hop, stretch, earTwitch]);
+  }, [mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood]);
 }
 
