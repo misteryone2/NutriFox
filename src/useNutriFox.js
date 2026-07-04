@@ -53,6 +53,7 @@ export const FOOD_DB = {
     { name:"Pollo alla cacciatora",     kcal:260, p:28, c:6,  f:14,  type:"protein" },
     { name:"Tonno alla griglia",        kcal:200, p:34, c:0,  f:7,   type:"protein" },
     { name:"Petto di tacchino grigliato", kcal:150, p:32, c:0, f:1.8, type:"protein" },
+    { name:"Ceviche di pesce (100g)",   kcal:110, p:18, c:4,  f:2,   type:"protein" },
   ],
   "Uova e Latticini": [
     { name:"Uovo intero",               kcal:78,  p:6,  c:0.6,f:5,   type:"protein" },
@@ -270,6 +271,7 @@ export const FOOD_DB = {
     { name:"Latte di mandorla (200ml)", kcal:50,  p:1,  c:7,  f:2,   type:"light"   },
     { name:"Protein shake (300ml)",     kcal:180, p:30, c:8,  f:3,   type:"protein" },
     { name:"Chinotto (330ml)",          kcal:120, p:0,  c:30, f:0,   type:"carb"    },
+    { name:"Tè freddo limone (330ml)",  kcal:110, p:0,  c:27, f:0,   type:"carb"    },
   ],
 };
 
@@ -522,6 +524,137 @@ export const GOALS={
   tener_traccia:   {label:"Tener traccia",  emoji:"📋", mult:1.1},
 };
 
+// ─── MOTORE DI ANALISI NUTRIZIONALE (v1.6) ─────────────────────────────────────
+// Tutta questa sezione è deterministica e pura: nessuna chiamata esterna,
+// nessuno stato React. Prende in input i dati già calcolati dall'hook (totali,
+// obiettivi, storico) e restituisce fatti e suggerimenti concreti. È pensata
+// per essere riutilizzabile così com'è anche da una futura AI: le stesse
+// funzioni possono alimentare un prompt (i "fatti" restano identici), oppure
+// generare direttamente il testo come fa oggi getNutritionInsights().
+
+// Quota indicativa di calorie giornaliere per tipo di pasto — usata sia per i
+// suggerimenti di porzione sia per l'analisi della distribuzione calorica.
+const MEAL_SHARE = { Colazione:0.20, Pranzo:0.35, Cena:0.35, Spuntino:0.10 };
+
+// Obiettivi di macronutrienti in grammi. Se il peso è noto usiamo una stima
+// realistica (1.6g proteine/kg), altrimenti una ripartizione percentuale
+// standard delle calorie totali. Sempre deterministico, mai casuale.
+function getMacroTargets(gKcal, profile) {
+  const proteinTargetG = profile.weight ? Math.round(Number(profile.weight)*1.6) : Math.round(gKcal*0.15/4);
+  const fatTargetG = Math.round(gKcal*0.28/9);
+  const carbTargetG = Math.max(0, Math.round((gKcal - proteinTargetG*4 - fatTargetG*9)/4));
+  return { proteinTargetG, carbTargetG, fatTargetG };
+}
+
+// Estrae i grammi/ml già presenti nel nome di un alimento, es. "Cozze (100g)".
+// Molte voci del database li hanno già; quando mancano si ragiona per porzioni.
+function parsePortionGrams(food) {
+  const m = food.name.match(/\((\d+)\s*(g|ml)\)/i);
+  return m ? { amount:Number(m[1]), unit:m[2].toLowerCase() } : null;
+}
+
+const PORTION_LABELS = { 0.5:"metà porzione", 0.75:"¾ di porzione", 1:"porzione intera", 1.25:"1¼ porzioni", 1.5:"1½ porzioni", 1.75:"1¾ porzioni", 2:"porzione doppia" };
+const PORTION_STEPS = [0.5,0.75,1,1.25,1.5,1.75,2];
+
+// Quantità consigliata per un alimento, nel contesto del pasto e di quanto
+// budget calorico resta in giornata. Non prescrive mai "zero": anche a
+// obiettivo già superato suggerisce almeno metà porzione (mai giudicante).
+function suggestPortion(food, mealType, { gKcal, totalKcal }) {
+  if (!food.kcal || food.kcal<=0) return null; // es. acqua: nessun senso di suggerire quantità
+  const share = MEAL_SHARE[mealType] ?? 0.25;
+  const remainingKcal = Math.max(0, gKcal-totalKcal);
+  const idealSlot = Math.min(remainingKcal>0?remainingKcal:gKcal*share, gKcal*share);
+  let ratio = idealSlot/food.kcal;
+  ratio = Math.max(0.5, Math.min(2, ratio));
+  ratio = PORTION_STEPS.reduce((a,b)=>Math.abs(b-ratio)<Math.abs(a-ratio)?b:a);
+  const parsed = parsePortionGrams(food);
+  return {
+    ratio,
+    label: parsed ? `~${Math.round(parsed.amount*ratio)}${parsed.unit} consigliati` : PORTION_LABELS[ratio],
+  };
+}
+
+// Quale macronutriente è più indietro rispetto al proprio obiettivo giornaliero.
+function analyzeMissingNutrient({ totalP, totalC, totalF, targets }) {
+  const gaps = [
+    { nutrient:"proteine",    pct: targets.proteinTargetG ? totalP/targets.proteinTargetG : 1, missing: Math.max(0,targets.proteinTargetG-totalP) },
+    { nutrient:"carboidrati", pct: targets.carbTargetG    ? totalC/targets.carbTargetG    : 1, missing: Math.max(0,targets.carbTargetG-totalC) },
+    { nutrient:"grassi",      pct: targets.fatTargetG     ? totalF/targets.fatTargetG     : 1, missing: Math.max(0,targets.fatTargetG-totalF) },
+  ];
+  const worst = gaps.reduce((a,b)=>b.pct<a.pct?b:a);
+  if (worst.pct >= 0.85) return null; // già in linea, nulla da segnalare
+  return { nutrient: worst.nutrient, missingGrams: Math.round(worst.missing) };
+}
+
+// Equilibrio dei pasti già registrati oggi: troppo grassi o troppo poche proteine.
+function analyzeMealBalance(meals) {
+  if (!meals.length) return null;
+  const t = sumMacros(meals);
+  const cals = t.p*4 + t.c*4 + t.f*9;
+  if (cals===0) return null;
+  const fatPct = (t.f*9)/cals, proteinPct = (t.p*4)/cals;
+  if (fatPct > 0.45) return { type:"fat_heavy", pct:Math.round(fatPct*100) };
+  if (proteinPct < 0.12 && meals.length>=2) return { type:"low_protein", pct:Math.round(proteinPct*100) };
+  return null;
+}
+
+// Distribuzione calorica tra i pasti di oggi: un singolo pasto troppo dominante.
+function analyzeDistribution(todayMeals) {
+  if (todayMeals.length<2) return null;
+  const byMeal = {};
+  todayMeals.forEach(m=>{ byMeal[m.meal]=(byMeal[m.meal]||0)+(m.kcal||0); });
+  const total = Object.values(byMeal).reduce((a,b)=>a+b,0);
+  if (total===0) return null;
+  const top = Object.entries(byMeal).map(([meal,kcal])=>({meal,pct:Math.round((kcal/total)*100)})).reduce((a,b)=>b.pct>a.pct?b:a);
+  return top.pct>=65 ? top : null;
+}
+
+// Trend delle calorie negli ultimi giorni (esclude oggi, che è ancora in corso).
+// Riusa lastNDayKeys/sumMacros già usati per memoria pasti e media settimanale.
+function analyzeTrend(dailyLog, days=7) {
+  const kcals = lastNDayKeys(days,1).map(k=>sumMacros(dailyLog[k]?.meals||[]).kcal).reverse();
+  const logged = kcals.filter(k=>k>0);
+  if (logged.length < 3) return null;
+  const half = Math.floor(logged.length/2);
+  const firstAvg = logged.slice(0,half).reduce((a,b)=>a+b,0)/half;
+  const secondAvg = logged.slice(-half).reduce((a,b)=>a+b,0)/half;
+  const diff = secondAvg-firstAvg;
+  const direction = Math.abs(diff) < firstAvg*0.08 ? "stable" : diff>0 ? "up" : "down";
+  return { direction, daysLogged: logged.length, avg: Math.round(logged.reduce((a,b)=>a+b,0)/logged.length) };
+}
+
+// 2-3 piccoli obiettivi per la giornata, sempre calcolati dallo stato reale
+// (mai statici): l'utente vede subito cosa è già raggiunto.
+function getDailyGoals({ targetWater, water, missingNutrient, mealsCount }) {
+  const goals = [{ id:"water", label:`Bevi ${targetWater} bicchieri d'acqua`, done: water>=targetWater }];
+  if (missingNutrient) goals.push({ id:"nutrient", label:`Aggiungi una fonte di ${missingNutrient.nutrient}`, done:false });
+  goals.push({ id:"meals", label:"Registra almeno 3 pasti oggi", done: mealsCount>=3 });
+  return goals.slice(0,3);
+}
+
+// Punto di ingresso unico del motore: combina tutte le analisi e sceglie il
+// messaggio più utile da mostrare come "headline" del coach. La priorità
+// riflette cosa è più actionable adesso per l'utente.
+function getNutritionInsights({ dailyLog, todayMeals, totalP, totalC, totalF, gKcal, totalKcal, profile, water, targetWater }) {
+  const targets = getMacroTargets(gKcal, profile);
+  const missingNutrient = analyzeMissingNutrient({ totalP, totalC, totalF, targets });
+  const mealBalance = analyzeMealBalance(todayMeals);
+  const distribution = analyzeDistribution(todayMeals);
+  const trend = analyzeTrend(dailyLog);
+  const dailyGoals = getDailyGoals({ targetWater, water, missingNutrient, mealsCount: todayMeals.length });
+
+  let headline;
+  if (missingNutrient) headline = `Ti mancano circa ${missingNutrient.missingGrams}g di ${missingNutrient.nutrient} rispetto al tuo obiettivo di oggi.`;
+  else if (mealBalance?.type==="fat_heavy") headline = `Oggi i pasti sono piuttosto ricchi di grassi (${mealBalance.pct}% delle calorie).`;
+  else if (mealBalance?.type==="low_protein") headline = `Potresti aggiungere più proteine ai prossimi pasti (solo ${mealBalance.pct}% delle calorie finora).`;
+  else if (distribution) headline = `${distribution.meal} ha coperto il ${distribution.pct}% delle calorie di oggi: prova a distribuirle meglio nei prossimi giorni.`;
+  else if (trend?.direction==="up") headline = `Le tue calorie medie sono in aumento negli ultimi giorni (~${trend.avg} kcal/giorno).`;
+  else if (trend?.direction==="down") headline = `Le tue calorie medie sono in calo negli ultimi giorni (~${trend.avg} kcal/giorno).`;
+  else headline = "Stai mantenendo un buon equilibrio nutrizionale, continua così!";
+
+  return { targets, missingNutrient, mealBalance, distribution, trend, dailyGoals, headline };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // HOOK PRINCIPALE — tutto lo stato persistito, le derivazioni e le azioni.
 // App.jsx chiama questo hook una volta e usa l'oggetto restituito per il
@@ -618,6 +751,20 @@ export function useNutriFox() {
     hoursSinceLastFed, water, targetWater, totalP, mealsCount:todayData.meals.length,
     totalKcal, gKcal, mood, foxName, dailyLog, todayMeals:todayData.meals,
   }),[hoursSinceLastFed, water, targetWater, totalP, todayData.meals, totalKcal, gKcal, mood, foxName, dailyLog]);
+
+  // Motore di analisi nutrizionale (v1.6): combina target macro, equilibrio
+  // pasti, distribuzione calorica e trend recente. Memoizzato perché include
+  // un'analisi su 7 giorni di storico, non va ricalcolata ad ogni render.
+  const insights = useMemo(()=>getNutritionInsights({
+    dailyLog, todayMeals:todayData.meals, totalP, totalC, totalF, gKcal, totalKcal, profile, water, targetWater,
+  }),[dailyLog, todayData.meals, totalP, totalC, totalF, gKcal, totalKcal, profile, water, targetWater]);
+
+  // Quantità consigliata per un alimento specifico nel contesto del pasto che
+  // si sta per registrare. Non memoizzata: è una funzione O(1) invocata per
+  // ogni riga della lista alimenti, il costo è trascurabile.
+  function suggestPortionFor(food, mealType) {
+    return suggestPortion(food, mealType, { gKcal, totalKcal });
+  }
 
   // Effetti di ricompensa: si attivano una sola volta per evento al giorno.
   useEffect(()=>{
@@ -771,6 +918,8 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
     // derivazioni
     today, todayData, streak, stage, mood, contextualMessage,
     totalKcal, totalP, totalC, totalF, gKcal, targetWater, weekAvg,
+    // motore di analisi nutrizionale (v1.6)
+    insights, suggestPortion: suggestPortionFor,
     // alimenti
     categories, getPool, FOOD_DB, ALL_FOODS,
     // azioni
