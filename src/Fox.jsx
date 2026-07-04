@@ -22,11 +22,16 @@ export function getFoxStage(streak) {
   return                   { name:"Cucciolo",    color:"#F4845F", aura:false, scale:1.0  };
 }
 
-function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFedAt = null, licking = false }) {
+function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFedAt = null, licking = false, specialEmotion = null }) {
 
-  // 1. Pose + visualMood derivati con la stessa funzione pura usata da useFoxBrain,
-  //    così l'intent delle animazioni idle è SEMPRE coerente con la pose reale.
-  const { visualMood, hoursSinceLastFed } = deriveVisualState({ mood, lastFedAt });
+  // 1. Pose + visualMood di base con la stessa funzione pura usata da useFoxBrain.
+  //    v1.8: se il motore decisionale chiede un'emozione speciale (proud/curious)
+  //    la applichiamo qui, RISOLVENDO UNA VOLA SOLA il visualMood finale — tranne
+  //    quando la volpe sta dormendo/è assopita, che vince sempre su tutto il resto.
+  const { visualMood: baseVisualMood, hoursSinceLastFed } = deriveVisualState({ mood, lastFedAt });
+  const visualMood = (baseVisualMood==="sleeping" || baseVisualMood==="drowsy")
+    ? baseVisualMood
+    : (specialEmotion || baseVisualMood);
   const intent = getAnimationIntent(visualMood);
   // Bucket a 15 minuti: evita che l'effetto di rallentamento del blink si
   // riarmi ad ogni singolo render (hoursSinceLastFed cambia in continuazione).
@@ -35,12 +40,13 @@ function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFed
   // 2. Micro-animazioni idle: scheduler unico, valori boolean/numerici
   const { blink, lookOffset, headTilt, tailFlick, earTwitch, hop, yawn, stretch } = useFoxAnimations(intent, hoursBucket);
 
-  // 3. Tutte le derivazioni visive: un oggetto unico, nessuna logica inline qui
-  const brain = useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch });
+  // 3. Tutte le derivazioni visive: un oggetto unico, nessuna logica inline qui.
+  //    Il visualMood già risolto sopra viene passato così com'è, non ricalcolato.
+  const brain = useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood: visualMood });
 
   const { stage, poseTransform, bodyAnim, tailSpeed } = brain;
 
-  const showParticles = visualMood === "happy" || visualMood === "excited";
+  const showParticles = visualMood === "happy" || visualMood === "excited" || visualMood === "proud";
 
   // v1.3.2: due varianti di bounce scelte a caso ad ogni pasto, così il feedback
   // al pasto non è sempre identico al pixel.
