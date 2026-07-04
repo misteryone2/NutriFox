@@ -48,7 +48,7 @@ export default function NutriFox() {
     setupDone, setSetupDone, foxName, setFoxName, goalKey, setGoalKey, profile, setProfile,
     dailyLog, favorites, customRecipes, water, setWater,
     aiMessages, aiInput, setAiInput, aiLoading, askFox, chatEndRef,
-    foxState, bounce, feedLabel, reaction, reward, licking,
+    foxState, bounce, feedLabel, reaction, reward, licking, specialEmotion,
     today, todayData, streak, stage, mood, contextualMessage,
     totalKcal, totalP, totalC, totalF, gKcal, targetWater, weekAvg,
     insights, suggestPortion,
@@ -462,8 +462,11 @@ export default function NutriFox() {
   );
 
   // ── HOME ──────────────────────────────────────────────────────────────────────
-  const moodLabels={happy:"Soddisfatta",excited:"Euforica!",content:"Serena",neutral:"Tranquilla",sad:"Ho fame..."};
-  const moodEmoji ={happy:"😊",excited:"🤩",content:"🙂",neutral:"😌",sad:"😟"};
+  const moodLabels={happy:"Soddisfatta",excited:"Euforica!",content:"Serena",neutral:"Tranquilla",sad:"Ho fame...",proud:"Orgogliosa!",curious:"Curiosa"};
+  const moodEmoji ={happy:"😊",excited:"🤩",content:"🙂",neutral:"😌",sad:"😟",proud:"🏆",curious:"🤔"};
+  // v1.8: se il motore ha richiesto un'emozione speciale, l'etichetta la segue —
+  // niente più disallineamento tra volto (proud/curious) e testo sotto il nome.
+  const displayMood = specialEmotion || mood;
   const hungerColor=foxState.hunger>70?C.accent:foxState.hunger>40?C.gold:C.green;
   const energyColor=foxState.energy>60?C.green:foxState.energy>30?C.gold:C.accent;
   const happinessColor=(foxState.happiness??70)>60?C.green:(foxState.happiness??70)>30?C.gold:C.accent;
@@ -500,7 +503,7 @@ export default function NutriFox() {
 
         {/* Fox + reaction popup + feed label */}
         <div style={{position:"relative",display:"inline-block"}}>
-          <Fox mood={mood} streak={streak} size={160} bounce={bounce} lastFedAt={foxState.lastFedAt} licking={licking}/>
+          <Fox mood={mood} streak={streak} size={160} bounce={bounce} lastFedAt={foxState.lastFedAt} licking={licking} specialEmotion={specialEmotion}/>
           {feedLabel&&(
             <div style={{position:"absolute",top:-10,left:"50%",transform:"translateX(-50%)",background:`linear-gradient(135deg,${C.accent},#E8553F)`,borderRadius:20,padding:"5px 14px",fontSize:13,fontWeight:700,color:"white",whiteSpace:"nowrap",animation:"floatUp 2s ease-out forwards",boxShadow:`0 4px 16px ${C.accent}55`}}>
               {feedLabel}
@@ -517,8 +520,8 @@ export default function NutriFox() {
         {/* Stato emotivo — fumetto con dialogo contestuale, sostituisce l'etichetta generica */}
         <div style={{color:C.text,fontWeight:700,fontSize:16,marginTop:4}}>{foxName}</div>
         <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginBottom:8}}>
-          <span style={{fontSize:16}}>{moodEmoji[mood]||"😌"}</span>
-          <span style={{color:stage.color,fontSize:12,fontWeight:700}}>{moodLabels[mood]||"Tranquilla"}</span>
+          <span style={{fontSize:16}}>{moodEmoji[displayMood]||"😌"}</span>
+          <span style={{color:stage.color,fontSize:12,fontWeight:700}}>{moodLabels[displayMood]||"Tranquilla"}</span>
         </div>
         <div style={{background:"#0F0A1A99",borderRadius:14,padding:"8px 14px",margin:"0 8px 12px",fontSize:12.5,color:C.text,lineHeight:1.4,fontStyle:"italic"}}>
           "{contextualMessage}"
