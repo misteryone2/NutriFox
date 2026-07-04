@@ -161,10 +161,11 @@ export default function FoxSVG({
               </>
             )}
 
-            {/* SOPRACCIGLIA */}
+            {/* SOPRACCIGLIA — v1.8: browAsymmetry alza il sopracciglio destro
+                (espressione "curious"), 0 per tutte le altre espressioni */}
             <path d={`M 26 ${33+ex.bY} Q 34 ${29+ex.bY-ex.bCurve} 42 ${33+ex.bY}`}
               stroke="#5A2800" strokeWidth="2.8" fill="none" strokeLinecap="round"/>
-            <path d={`M 56 ${33+ex.bY} Q 64 ${29+ex.bY-ex.bCurve} 72 ${33+ex.bY}`}
+            <path d={`M 56 ${33+ex.bY-ex.browAsymmetry} Q 64 ${29+ex.bY-ex.bCurve-ex.browAsymmetry} 72 ${33+ex.bY-ex.browAsymmetry}`}
               stroke="#5A2800" strokeWidth="2.8" fill="none" strokeLinecap="round"/>
 
             {ex.sparkleBrows && (
@@ -227,6 +228,16 @@ export default function FoxSVG({
           <line key={i} x1={x1} y1={y1} x2={x2} y2={y2}
             stroke="#C8A882" strokeWidth="0.9" opacity="0.5" strokeLinecap="round"/>
         ))}
+
+        {/* Badge emozione speciale (v1.8) — stella per "proud", punto
+            interrogativo per "curious". Stesso angolo dove compare lo "zzz"
+            del sonno, mai visibile insieme perché sono espressioni esclusive. */}
+        {ex.badge==="star" && (
+          <text x="83" y="27" fontSize="14" fill="#F9C74F" fontWeight="bold" opacity="0.95" filter="url(#eg)">★</text>
+        )}
+        {ex.badge==="question" && (
+          <text x="84" y="28" fontSize="15" fill="#A78BFA" fontWeight="bold" opacity="0.95" filter="url(#eg)">?</text>
+        )}
 
         {/* Badge stadio */}
         {streak>=30 && (
