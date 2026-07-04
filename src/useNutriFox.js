@@ -55,6 +55,7 @@ export const FOOD_DB = {
     { name:"Petto di tacchino grigliato", kcal:150, p:32, c:0, f:1.8, type:"protein" },
     { name:"Ceviche di pesce (100g)",   kcal:110, p:18, c:4,  f:2,   type:"protein" },
     { name:"Involtini di pollo (2 pz)", kcal:220, p:26, c:4,  f:11,  type:"protein" },
+    { name:"Filetto di merluzzo al vapore", kcal:90, p:19, c:0, f:1, type:"protein" },
   ],
   "Uova e Latticini": [
     { name:"Uovo intero",               kcal:78,  p:6,  c:0.6,f:5,   type:"protein" },
@@ -389,7 +390,7 @@ function selectMessage(library, ctx, messageHistory, now=Date.now()) {
       }
       return true;
     })
-    .map(c => ({ id:c.id, priority:c.priority, weight:c.weight, text: typeof c.text==="function" ? c.text(ctx) : c.text }));
+    .map(c => ({ id:c.id, priority:c.priority, weight:c.weight, emotion:c.emotion||null, text: typeof c.text==="function" ? c.text(ctx) : c.text }));
   return pickTopPriority(eligible);
 }
 
@@ -487,25 +488,25 @@ const AMBIENT_MESSAGES = [
   { id:"amb_long_wait",    priority:1, cooldownMin:0,
     condition: ctx => ctx.hoursSinceLastFed!=null && ctx.hoursSinceLastFed>=5,
     text: () => "È da tanto che non mangiamo... quando vuoi io ci sono!" },
-  { id:"amb_thirsty",      priority:1, cooldownMin:0,
+  { id:"amb_thirsty",      priority:1, cooldownMin:0, emotion:"curious",
     condition: ctx => ctx.water < ctx.targetWater*0.4 && ctx.mealsCount>0,
     text: () => "Ho un po' sete... un bicchiere d'acqua? 💧" },
-  { id:"amb_low_protein",  priority:2, cooldownMin:0,
+  { id:"amb_low_protein",  priority:2, cooldownMin:0, emotion:"curious",
     condition: ctx => ctx.totalP<20 && ctx.mealsCount>=2,
     text: () => "Oggi ci servirebbe un po' più di forza, che ne dici di qualcosa di proteico?" },
-  { id:"amb_three_meals",  priority:3, cooldownMin:0,
+  { id:"amb_three_meals",  priority:3, cooldownMin:0, emotion:"proud",
     condition: ctx => ctx.mealsCount===3,
     text: () => "Questo è il terzo pasto di oggi, stiamo andando alla grande!" },
-  { id:"amb_weekly_memory",priority:3, cooldownMin:180,
+  { id:"amb_weekly_memory",priority:3, cooldownMin:180, emotion:"proud",
     condition: ctx => !!ctx.frequentFood,
     text: ctx => `È ${ordinalIt(ctx.frequentFood.count)} ${ctx.frequentFood.name} questa settimana — ti piace davvero! 🦊` },
-  { id:"amb_water_done",   priority:3, cooldownMin:0,
+  { id:"amb_water_done",   priority:3, cooldownMin:0, emotion:"proud",
     condition: ctx => ctx.water>=ctx.targetWater && ctx.mealsCount>0,
     text: () => "Hai già bevuto abbastanza, bravissimo!" },
-  { id:"amb_on_track",     priority:3, cooldownMin:0,
+  { id:"amb_on_track",     priority:3, cooldownMin:0, emotion:"proud",
     condition: ctx => ctx.totalKcal>0 && ctx.totalKcal<=ctx.gKcal && ctx.mealsCount>=2,
     text: () => "Stai rispettando il tuo obiettivo, sono fiera di te!" },
-  { id:"amb_routine_greeting", priority:4, cooldownMin:0,
+  { id:"amb_routine_greeting", priority:4, cooldownMin:0, emotion:"curious",
     condition: ctx => ctx.mealsCount===0 && !!ctx.breakfastRoutine && new Date().getHours()<11,
     text: ctx => `Di solito fai colazione verso le ${ctx.breakfastRoutine.avgHour}, ti aspetto! 🦊` },
   { id:"amb_mood_excited", priority:5, cooldownMin:0, condition: ctx=>ctx.mood==="excited", text: () => "Mi sento davvero bene oggi! ✨" },
@@ -809,6 +810,10 @@ export function useNutriFox() {
     totalKcal, gKcal, mood, foxName, dailyLog, todayMeals:todayData.meals,
   }), messageHistory),[hoursSinceLastFed, water, targetWater, totalP, todayData.meals, totalKcal, gKcal, mood, foxName, dailyLog, messageHistory]);
   const contextualMessage = ambientResult.text;
+  // v1.8: quale emozione mostrare sul volto mentre questo messaggio è attivo.
+  // Una ricompensa in corso (streak/obiettivo/acqua) vince sempre — è il
+  // momento più "orgoglioso" possibile — altrimenti segue il messaggio ambient.
+  const specialEmotion = reward ? "proud" : ambientResult.emotion;
   const prevAmbientId = useRef(null);
   useEffect(()=>{
     if (ambientResult.id !== prevAmbientId.current) {
@@ -987,7 +992,7 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
     // coach AI
     aiMessages, aiInput, setAiInput, aiLoading, askFox, chatEndRef,
     // stato volpe
-    foxState, bounce, feedLabel, reaction, reward, licking,
+    foxState, bounce, feedLabel, reaction, reward, licking, specialEmotion,
     // derivazioni
     today, todayData, streak, stage, mood, contextualMessage,
     totalKcal, totalP, totalC, totalF, gKcal, targetWater, weekAvg,
