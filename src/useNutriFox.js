@@ -54,6 +54,7 @@ export const FOOD_DB = {
     { name:"Tonno alla griglia",        kcal:200, p:34, c:0,  f:7,   type:"protein" },
     { name:"Petto di tacchino grigliato", kcal:150, p:32, c:0, f:1.8, type:"protein" },
     { name:"Ceviche di pesce (100g)",   kcal:110, p:18, c:4,  f:2,   type:"protein" },
+    { name:"Involtini di pollo (2 pz)", kcal:220, p:26, c:4,  f:11,  type:"protein" },
   ],
   "Uova e Latticini": [
     { name:"Uovo intero",               kcal:78,  p:6,  c:0.6,f:5,   type:"protein" },
@@ -272,6 +273,7 @@ export const FOOD_DB = {
     { name:"Protein shake (300ml)",     kcal:180, p:30, c:8,  f:3,   type:"protein" },
     { name:"Chinotto (330ml)",          kcal:120, p:0,  c:30, f:0,   type:"carb"    },
     { name:"Tè freddo limone (330ml)",  kcal:110, p:0,  c:27, f:0,   type:"carb"    },
+    { name:"Kombucha (250ml)",          kcal:55,  p:0,  c:14, f:0,   type:"light"   },
   ],
 };
 
@@ -343,7 +345,60 @@ export function sumMacros(items) {
   };
 }
 
-// ─── DIALOGHI & MEMORIA (v1.4) ────────────────────────────────────────────────
+// ─── MOTORE DECISIONALE UNIFICATO (v1.7) ───────────────────────────────────────
+// Prima ogni superficie (didascalia in home, popup dopo il pasto, headline del
+// coach) aveva la propria logica di scelta del messaggio: un if/else in
+// ordine di priorità per la didascalia, un pescaggio pesato per il popup, un
+// altro if/else per la headline. Le regole erano equivalenti nello spirito
+// ("mostra prima ciò che conta di più") ma implementate tre volte in modo
+// diverso. Ora un'unica coppia di funzioni primitive gestisce la selezione
+// per tutte e tre le superfici:
+//
+//  - pickTopPriority(candidati): dato un elenco già filtrato per eleggibilità,
+//    sceglie il candidato di priorità più alta (numero più basso = più
+//    importante); a parità di priorità sceglie a caso pesato tra i pari.
+//  - selectMessage(libreria, ctx, storico): valuta condition() e cooldown per
+//    ogni voce della libreria, poi delega a pickTopPriority.
+//
+// Il cooldown (persistito in nf_msgHistory) evita che un "fatto" via via
+// meno urgente di un avviso importante si ripeta troppo spesso — le regole
+// generali sono le stesse per tutte le superfici, cambia solo la libreria di
+// contenuti che ciascuna consulta.
+
+function pickTopPriority(eligible) {
+  if (eligible.length === 0) return null;
+  const topPriority = Math.min(...eligible.map(c=>c.priority));
+  const topTier = eligible.filter(c=>c.priority===topPriority);
+  const totalWeight = topTier.reduce((s,c)=>s+(c.weight||1),0);
+  let r = Math.random()*totalWeight;
+  for (const c of topTier) {
+    const w = c.weight||1;
+    if (r < w) return c;
+    r -= w;
+  }
+  return topTier[topTier.length-1];
+}
+
+function selectMessage(library, ctx, messageHistory, now=Date.now()) {
+  const eligible = library
+    .filter(c => {
+      if (!c.condition(ctx)) return false;
+      if (c.cooldownMin>0) {
+        const last = messageHistory[c.id];
+        if (last && now-last < c.cooldownMin*60000) return false;
+      }
+      return true;
+    })
+    .map(c => ({ id:c.id, priority:c.priority, weight:c.weight, text: typeof c.text==="function" ? c.text(ctx) : c.text }));
+  return pickTopPriority(eligible);
+}
+
+// ─── LIBRERIE DI CONTENUTO ──────────────────────────────────────────────────────
+// Ogni voce: { id, priority (1=più importante..5=presenza leggera), cooldownMin,
+// condition(ctx), text(ctx) }. Aggiungere un nuovo messaggio significa
+// aggiungere una voce qui, non toccare la logica di selezione.
+
+// Superficie "reaction": popup che appare subito dopo aver registrato un pasto.
 const REACTION_MESSAGES = {
   happy:     ["Che buono!", "Mi piace!", "Delizioso!", "{food}? Sì grazie!", "Che bontà questo {food}!", "Yum!", "Mi fa sempre piacere!"],
   energetic: ["Che carica!", "Sento l'energia!", "Forza pura!", "{food} è proprio quello che ci voleva!", "Ora sì che si corre!", "Che sprint!"],
@@ -358,8 +413,7 @@ function pickReaction(type, foodName) {
 }
 
 // Genera le chiavi data (YYYY-MM-DD) degli ultimi n giorni. offset=0 include
-// oggi, offset=1 parte da ieri. Prima duplicata identica in getFoodMemoryCount
-// e getMealRoutine — ora un'unica funzione condivisa.
+// oggi, offset=1 parte da ieri.
 function lastNDayKeys(n, offset=0) {
   const keys = [];
   for (let i = offset; i < offset+n; i++) {
@@ -402,100 +456,76 @@ function getMealRoutine(dailyLog, mealType) {
   return { avgHour, samples: hours.length };
 }
 
-// Selezione pesata generica: array di { weight, ...resto }
-function weightedPick(candidates) {
-  const total = candidates.reduce((s,c)=>s+c.weight, 0);
-  let r = Math.random()*total;
-  for (const c of candidates) {
-    if (r < c.weight) return c;
-    r -= c.weight;
-  }
-  return candidates[candidates.length-1];
-}
-
-// Compone la reazione al pasto: se c'è un fatto reale interessante (memoria
-// settimanale, routine oraria, attesa lunga) ha buone probabilità di essere
-// scelto al posto della frase generica.
-function composeMealReaction({ reactionType, foodName, dailyLog, mealType, waitedLong }) {
-  const candidates = [{ weight:6, text: pickReaction(reactionType, foodName) }]; // sempre disponibile
-
+// Candidati per la reazione al pasto. A differenza delle altre due superfici
+// non è una libreria statica valutata automaticamente: dipende dal singolo
+// alimento appena registrato, quindi viene costruita al volo — ma la scelta
+// finale passa dallo stesso pickTopPriority condiviso.
+function buildReactionCandidates({ reactionType, foodName, dailyLog, mealType, waitedLong }) {
+  const candidates = [
+    { priority:5, text: pickReaction(reactionType, foodName) }, // presenza leggera, sempre disponibile
+  ];
   if (waitedLong) {
-    candidates.push({ weight:5, text: pickReaction("relieved", foodName) });
+    candidates.push({ priority:1, text: pickReaction("relieved", foodName) }); // avviso importante: aspettava da ore
   }
-
   const memoryCount = getFoodMemoryCount(dailyLog, foodName);
   if (memoryCount >= 3) {
-    candidates.push({ weight:4, text: `È ${ordinalIt(memoryCount)} ${foodName} questa settimana!` });
+    candidates.push({ priority:3, text: `È ${ordinalIt(memoryCount)} ${foodName} questa settimana!` }); // riconoscimento
   }
-
   const routine = getMealRoutine(dailyLog, mealType);
   if (routine) {
-    const currentHour = new Date().getHours();
-    const diff = Math.abs(currentHour - routine.avgHour);
-    if (diff <= 1) {
-      candidates.push({ weight:3, text: `Puntuale come sempre, ${mealType.toLowerCase()} verso le ${routine.avgHour}!` });
-    } else if (diff >= 3) {
-      candidates.push({ weight:2, text: `Oggi ${mealType.toLowerCase()} un po' fuori dai tuoi orari soliti, va benissimo comunque!` });
-    }
+    const diff = Math.abs(new Date().getHours() - routine.avgHour);
+    if (diff <= 1) candidates.push({ priority:3, text: `Puntuale come sempre, ${mealType.toLowerCase()} verso le ${routine.avgHour}!` });
+    else if (diff >= 3) candidates.push({ priority:4, text: `Oggi ${mealType.toLowerCase()} un po' fuori dai tuoi orari soliti, va benissimo comunque!` });
   }
-
-  return weightedPick(candidates).text;
+  return pickTopPriority(candidates).text;
 }
 
-// Frasi affettuose e mai giudicanti, scelte in base alla situazione reale della
-// giornata. Priorità: bisogni fisici > memoria pasti di oggi > memoria
-// settimanale > routine > stato emotivo generico. Nessun Math.random() qui
-// dentro di proposito: la caption deve restare stabile tra un render e
-// l'altro finché lo stato reale non cambia davvero.
-function getContextualMessage(ctx) {
-  const { hoursSinceLastFed, water, targetWater, totalP, mealsCount, totalKcal, gKcal, mood, foxName, dailyLog, todayMeals } = ctx;
+// Superficie "ambient": la didascalia sempre visibile sotto la volpe in home.
+// Stessa gerarchia di prima (bisogni fisici > memoria > routine > umore) ma
+// espressa come dati anziché come catena di if/else.
+const AMBIENT_MESSAGES = [
+  { id:"amb_long_wait",    priority:1, cooldownMin:0,
+    condition: ctx => ctx.hoursSinceLastFed!=null && ctx.hoursSinceLastFed>=5,
+    text: () => "È da tanto che non mangiamo... quando vuoi io ci sono!" },
+  { id:"amb_thirsty",      priority:1, cooldownMin:0,
+    condition: ctx => ctx.water < ctx.targetWater*0.4 && ctx.mealsCount>0,
+    text: () => "Ho un po' sete... un bicchiere d'acqua? 💧" },
+  { id:"amb_low_protein",  priority:2, cooldownMin:0,
+    condition: ctx => ctx.totalP<20 && ctx.mealsCount>=2,
+    text: () => "Oggi ci servirebbe un po' più di forza, che ne dici di qualcosa di proteico?" },
+  { id:"amb_three_meals",  priority:3, cooldownMin:0,
+    condition: ctx => ctx.mealsCount===3,
+    text: () => "Questo è il terzo pasto di oggi, stiamo andando alla grande!" },
+  { id:"amb_weekly_memory",priority:3, cooldownMin:180,
+    condition: ctx => !!ctx.frequentFood,
+    text: ctx => `È ${ordinalIt(ctx.frequentFood.count)} ${ctx.frequentFood.name} questa settimana — ti piace davvero! 🦊` },
+  { id:"amb_water_done",   priority:3, cooldownMin:0,
+    condition: ctx => ctx.water>=ctx.targetWater && ctx.mealsCount>0,
+    text: () => "Hai già bevuto abbastanza, bravissimo!" },
+  { id:"amb_on_track",     priority:3, cooldownMin:0,
+    condition: ctx => ctx.totalKcal>0 && ctx.totalKcal<=ctx.gKcal && ctx.mealsCount>=2,
+    text: () => "Stai rispettando il tuo obiettivo, sono fiera di te!" },
+  { id:"amb_routine_greeting", priority:4, cooldownMin:0,
+    condition: ctx => ctx.mealsCount===0 && !!ctx.breakfastRoutine && new Date().getHours()<11,
+    text: ctx => `Di solito fai colazione verso le ${ctx.breakfastRoutine.avgHour}, ti aspetto! 🦊` },
+  { id:"amb_mood_excited", priority:5, cooldownMin:0, condition: ctx=>ctx.mood==="excited", text: () => "Mi sento davvero bene oggi! ✨" },
+  { id:"amb_mood_happy",   priority:5, cooldownMin:0, condition: ctx=>ctx.mood==="happy",   text: () => "Che bella giornata insieme!" },
+  { id:"amb_mood_content", priority:5, cooldownMin:0, condition: ctx=>ctx.mood==="content", text: () => "Tutto tranquillo, mi sento serena." },
+  { id:"amb_mood_sad",     priority:5, cooldownMin:0, condition: ctx=>ctx.mood==="sad",     text: () => "Un po' giù di energie... ma so che ci riprendiamo!" },
+  { id:"amb_greeting",     priority:5, cooldownMin:0, condition: ctx=>ctx.mealsCount===0,   text: ctx => `Ehi, sono ${ctx.foxName}! Pronta quando vuoi iniziare la giornata 🦊` },
+  { id:"amb_default",      priority:5, cooldownMin:0, condition: () => true,                text: () => "Sono curiosa di scoprire cosa mangiamo oggi!" },
+];
 
-  if (hoursSinceLastFed != null && hoursSinceLastFed >= 5) {
-    return "È da tanto che non mangiamo... quando vuoi io ci sono!";
-  }
-  if (water < targetWater * 0.4 && mealsCount > 0) {
-    return "Ho un po' sete... un bicchiere d'acqua? 💧";
-  }
-  if (totalP < 20 && mealsCount >= 2) {
-    return "Oggi ci servirebbe un po' più di forza, che ne dici di qualcosa di proteico?";
-  }
-  if (mealsCount === 3) {
-    return "Questo è il terzo pasto di oggi, stiamo andando alla grande!";
-  }
-  if (dailyLog && todayMeals && todayMeals.length > 0) {
-    const frequent = todayMeals
-      .map(m => ({ name:m.name, count:getFoodMemoryCount(dailyLog, m.name) }))
-      .find(f => f.count >= 3);
-    if (frequent) {
-      return `È ${ordinalIt(frequent.count)} ${frequent.name} questa settimana — ti piace davvero! 🦊`;
-    }
-  }
-  if (water >= targetWater && mealsCount > 0) {
-    return "Hai già bevuto abbastanza, bravissimo!";
-  }
-  if (totalKcal > 0 && totalKcal <= gKcal && mealsCount >= 2) {
-    return "Stai rispettando il tuo obiettivo, sono fiera di te!";
-  }
-  if (mealsCount === 0 && dailyLog && new Date().getHours() < 11) {
-    const routine = getMealRoutine(dailyLog, "Colazione");
-    if (routine) return `Di solito fai colazione verso le ${routine.avgHour}, ti aspetto! 🦊`;
-  }
-  if (mood === "excited") {
-    return "Mi sento davvero bene oggi! ✨";
-  }
-  if (mood === "happy") {
-    return "Che bella giornata insieme!";
-  }
-  if (mood === "content") {
-    return "Tutto tranquillo, mi sento serena.";
-  }
-  if (mood === "sad") {
-    return "Un po' giù di energie... ma so che ci riprendiamo!";
-  }
-  if (mealsCount === 0) {
-    return `Ehi, sono ${foxName}! Pronta quando vuoi iniziare la giornata 🦊`;
-  }
-  return "Sono curiosa di scoprire cosa mangiamo oggi!";
+// Costruisce il contesto per la superficie ambient, pre-calcolando i due fatti
+// che richiedono una scansione del diario (una sola volta, non per ogni voce
+// della libreria).
+function buildAmbientContext(base) {
+  const { dailyLog, todayMeals } = base;
+  const frequentFood = todayMeals?.length
+    ? todayMeals.map(m => ({ name:m.name, count:getFoodMemoryCount(dailyLog, m.name) })).find(f => f.count>=3) || null
+    : null;
+  const breakfastRoutine = dailyLog ? getMealRoutine(dailyLog, "Colazione") : null;
+  return { ...base, frequentFood, breakfastRoutine };
 }
 
 // ─── PROGRESSIONE & OBIETTIVI ──────────────────────────────────────────────────
@@ -635,7 +665,34 @@ function getDailyGoals({ targetWater, water, missingNutrient, mealsCount }) {
 // Punto di ingresso unico del motore: combina tutte le analisi e sceglie il
 // messaggio più utile da mostrare come "headline" del coach. La priorità
 // riflette cosa è più actionable adesso per l'utente.
-function getNutritionInsights({ dailyLog, todayMeals, totalP, totalC, totalF, gKcal, totalKcal, profile, water, targetWater }) {
+// Superficie "insight": la headline della card Coach in home. Stessa priorità
+// di prima (nutriente mancante > equilibrio pasti > distribuzione > trend >
+// presenza leggera), ora espressa come libreria valutata da selectMessage.
+const INSIGHT_MESSAGES = [
+  { id:"ins_missing_nutrient", priority:2, cooldownMin:0,
+    condition: ctx => !!ctx.missingNutrient,
+    text: ctx => `Ti mancano circa ${ctx.missingNutrient.missingGrams}g di ${ctx.missingNutrient.nutrient} rispetto al tuo obiettivo di oggi.` },
+  { id:"ins_fat_heavy", priority:2, cooldownMin:0,
+    condition: ctx => ctx.mealBalance?.type==="fat_heavy",
+    text: ctx => `Oggi i pasti sono piuttosto ricchi di grassi (${ctx.mealBalance.pct}% delle calorie).` },
+  { id:"ins_low_protein_balance", priority:2, cooldownMin:0,
+    condition: ctx => ctx.mealBalance?.type==="low_protein",
+    text: ctx => `Potresti aggiungere più proteine ai prossimi pasti (solo ${ctx.mealBalance.pct}% delle calorie finora).` },
+  { id:"ins_distribution", priority:2, cooldownMin:0,
+    condition: ctx => !!ctx.distribution,
+    text: ctx => `${ctx.distribution.meal} ha coperto il ${ctx.distribution.pct}% delle calorie di oggi: prova a distribuirle meglio nei prossimi giorni.` },
+  { id:"ins_trend_up", priority:4, cooldownMin:0,
+    condition: ctx => ctx.trend?.direction==="up",
+    text: ctx => `Le tue calorie medie sono in aumento negli ultimi giorni (~${ctx.trend.avg} kcal/giorno).` },
+  { id:"ins_trend_down", priority:4, cooldownMin:0,
+    condition: ctx => ctx.trend?.direction==="down",
+    text: ctx => `Le tue calorie medie sono in calo negli ultimi giorni (~${ctx.trend.avg} kcal/giorno).` },
+  { id:"ins_all_good", priority:5, cooldownMin:0,
+    condition: () => true,
+    text: () => "Stai mantenendo un buon equilibrio nutrizionale, continua così!" },
+];
+
+function getNutritionInsights({ dailyLog, todayMeals, totalP, totalC, totalF, gKcal, totalKcal, profile, water, targetWater }, messageHistory) {
   const targets = getMacroTargets(gKcal, profile);
   const missingNutrient = analyzeMissingNutrient({ totalP, totalC, totalF, targets });
   const mealBalance = analyzeMealBalance(todayMeals);
@@ -643,16 +700,9 @@ function getNutritionInsights({ dailyLog, todayMeals, totalP, totalC, totalF, gK
   const trend = analyzeTrend(dailyLog);
   const dailyGoals = getDailyGoals({ targetWater, water, missingNutrient, mealsCount: todayMeals.length });
 
-  let headline;
-  if (missingNutrient) headline = `Ti mancano circa ${missingNutrient.missingGrams}g di ${missingNutrient.nutrient} rispetto al tuo obiettivo di oggi.`;
-  else if (mealBalance?.type==="fat_heavy") headline = `Oggi i pasti sono piuttosto ricchi di grassi (${mealBalance.pct}% delle calorie).`;
-  else if (mealBalance?.type==="low_protein") headline = `Potresti aggiungere più proteine ai prossimi pasti (solo ${mealBalance.pct}% delle calorie finora).`;
-  else if (distribution) headline = `${distribution.meal} ha coperto il ${distribution.pct}% delle calorie di oggi: prova a distribuirle meglio nei prossimi giorni.`;
-  else if (trend?.direction==="up") headline = `Le tue calorie medie sono in aumento negli ultimi giorni (~${trend.avg} kcal/giorno).`;
-  else if (trend?.direction==="down") headline = `Le tue calorie medie sono in calo negli ultimi giorni (~${trend.avg} kcal/giorno).`;
-  else headline = "Stai mantenendo un buon equilibrio nutrizionale, continua così!";
+  const picked = selectMessage(INSIGHT_MESSAGES, { missingNutrient, mealBalance, distribution, trend }, messageHistory);
 
-  return { targets, missingNutrient, mealBalance, distribution, trend, dailyGoals, headline };
+  return { targets, missingNutrient, mealBalance, distribution, trend, dailyGoals, headline: picked.text, headlineId: picked.id };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -683,6 +733,10 @@ export function useNutriFox() {
   const [reward,    setReward]    = useState(null); // {icon} — effetto ricompensa <2s (streak/acqua/obiettivo)
   const [licking,   setLicking]   = useState(false); // si lecca i baffi subito dopo il pasto
   const [celebratedToday, setCelebratedToday] = useState(()=>load("nf_celebrated_"+todayKey(),{}));
+  // Cooldown del motore decisionale unificato (v1.7): quando è stato mostrato
+  // per l'ultima volta ogni id di messaggio, condiviso tra le tre superfici.
+  const [messageHistory, setMessageHistory] = useState(()=>load("nf_msgHistory",{}));
+  function recordMessageShown(id){ if(!id) return; setMessageHistory(prev=>({...prev,[id]:Date.now()})); }
 
   // Persist
   useEffect(()=>save("nf_setupDone",setupDone),[setupDone]);
@@ -698,6 +752,7 @@ export function useNutriFox() {
   useEffect(()=>save("nf_aimsg",aiMessages.slice(-40)),[aiMessages]);
   useEffect(()=>{ chatEndRef.current?.scrollIntoView({behavior:"smooth"}); },[aiMessages]);
   useEffect(()=>save("nf_celebrated_"+todayKey(),celebratedToday),[celebratedToday]);
+  useEffect(()=>save("nf_msgHistory",messageHistory),[messageHistory]);
 
   // Decay system leggero: ogni minuto hunger sale, energy scende.
   // moodIndex avanza di un solo gradino per tick verso il mood "target".
@@ -744,20 +799,38 @@ export function useNutriFox() {
 
   const hoursSinceLastFed = foxState.lastFedAt ? (Date.now()-foxState.lastFedAt)/3600000 : null;
 
-  // contextualMessage chiama memoria/routine (cicli su 7-14 giorni): memoizzato
-  // sulle dipendenze reali, non ricalcola ad ogni tick di decay se nulla di
-  // rilevante è cambiato.
-  const contextualMessage = useMemo(()=>getContextualMessage({
+  // Superficie "ambient" (didascalia in home): memoizzata sulle dipendenze
+  // reali, non ricalcola ad ogni tick di decay se nulla di rilevante è
+  // cambiato. Il cooldown viene registrato solo quando il messaggio
+  // selezionato CAMBIA (transizione), non ad ogni render — altrimenti un
+  // messaggio si auto-invaliderebbe l'istante dopo essere apparso.
+  const ambientResult = useMemo(()=>selectMessage(AMBIENT_MESSAGES, buildAmbientContext({
     hoursSinceLastFed, water, targetWater, totalP, mealsCount:todayData.meals.length,
     totalKcal, gKcal, mood, foxName, dailyLog, todayMeals:todayData.meals,
-  }),[hoursSinceLastFed, water, targetWater, totalP, todayData.meals, totalKcal, gKcal, mood, foxName, dailyLog]);
+  }), messageHistory),[hoursSinceLastFed, water, targetWater, totalP, todayData.meals, totalKcal, gKcal, mood, foxName, dailyLog, messageHistory]);
+  const contextualMessage = ambientResult.text;
+  const prevAmbientId = useRef(null);
+  useEffect(()=>{
+    if (ambientResult.id !== prevAmbientId.current) {
+      if (prevAmbientId.current) recordMessageShown(prevAmbientId.current);
+      prevAmbientId.current = ambientResult.id;
+    }
+  },[ambientResult.id]);
 
   // Motore di analisi nutrizionale (v1.6): combina target macro, equilibrio
   // pasti, distribuzione calorica e trend recente. Memoizzato perché include
   // un'analisi su 7 giorni di storico, non va ricalcolata ad ogni render.
+  // La headline (v1.7) passa dallo stesso motore/cooldown condiviso.
   const insights = useMemo(()=>getNutritionInsights({
     dailyLog, todayMeals:todayData.meals, totalP, totalC, totalF, gKcal, totalKcal, profile, water, targetWater,
-  }),[dailyLog, todayData.meals, totalP, totalC, totalF, gKcal, totalKcal, profile, water, targetWater]);
+  }, messageHistory),[dailyLog, todayData.meals, totalP, totalC, totalF, gKcal, totalKcal, profile, water, targetWater, messageHistory]);
+  const prevInsightId = useRef(null);
+  useEffect(()=>{
+    if (insights.headlineId !== prevInsightId.current) {
+      if (prevInsightId.current) recordMessageShown(prevInsightId.current);
+      prevInsightId.current = insights.headlineId;
+    }
+  },[insights.headlineId]);
 
   // Quantità consigliata per un alimento specifico nel contesto del pasto che
   // si sta per registrare. Non memoizzata: è una funzione O(1) invocata per
@@ -867,7 +940,7 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
     const effect=getFoodEffect(food);
     const waitedLong = hoursSinceLastFed != null && hoursSinceLastFed >= 5;
     const reactionType = waitedLong ? "relieved" : effect.reaction;
-    const message = composeMealReaction({
+    const message = buildReactionCandidates({
       reactionType, foodName:food.name, dailyLog, mealType, waitedLong,
     });
     setFoxState(prev=>{
