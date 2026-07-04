@@ -51,6 +51,7 @@ export default function NutriFox() {
     foxState, bounce, feedLabel, reaction, reward, licking,
     today, todayData, streak, stage, mood, contextualMessage,
     totalKcal, totalP, totalC, totalF, gKcal, targetWater, weekAvg,
+    insights, suggestPortion,
     categories, getPool, FOOD_DB, ALL_FOODS,
     addFood, addCustomFood, removeFood, saveRecipe, toggleFavorite,
   } = nf;
@@ -302,14 +303,16 @@ export default function NutriFox() {
           {search&&<div style={{color:C.muted,fontSize:12,marginBottom:8}}>{filteredFoods.length} risultati</div>}
           <div style={{display:"flex",flexDirection:"column",gap:5,maxHeight:440,overflowY:"auto"}}>
             {filteredFoods.length===0?<p style={{color:C.muted,fontSize:13,textAlign:"center",padding:20}}>Nessun alimento trovato</p>
-            :filteredFoods.map((f,i)=>(
+            :filteredFoods.map((f,i)=>{
+              const portion = suggestPortion(f, mealType);
+              return(
               <div key={i} style={{background:"#0F0A1A",border:`1px solid ${C.cardBorder}`,borderRadius:10,display:"flex",alignItems:"center",overflow:"hidden",minHeight:42}}>
                 <button
                   onClick={()=>{ addFood(f, mealType); setSearch(""); setScreen("home"); }}
                   style={{flex:1,background:"none",border:"none",color:C.text,padding:"9px 12px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left",minWidth:0}}>
                   <div style={{flex:1,minWidth:0,paddingRight:8}}>
                     <div style={{fontSize:13,fontWeight:600,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{f.name}</div>
-                    <div style={{fontSize:10,color:C.muted,marginTop:1}}>P {f.p}g · C {f.c}g · G {f.f}g</div>
+                    <div style={{fontSize:10,color:C.muted,marginTop:1}}>P {f.p}g · C {f.c}g · G {f.f}g{portion&&portion.ratio!==1?` · ${portion.label}`:""}</div>
                   </div>
                   <span style={{color:C.accent,fontWeight:700,fontSize:13,flexShrink:0}}>{f.kcal}</span>
                 </button>
@@ -317,7 +320,8 @@ export default function NutriFox() {
                   {favorites.includes(f.name)?"★":"☆"}
                 </button>
               </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
@@ -326,15 +330,18 @@ export default function NutriFox() {
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
           <button onClick={()=>setScreen("builder")} style={{background:"#F4845F11",border:`2px dashed ${C.accent}`,borderRadius:14,color:C.accent,padding:14,fontSize:14,fontWeight:700,cursor:"pointer"}}>+ Crea nuovo piatto</button>
           {customRecipes.length===0?<p style={{color:C.muted,textAlign:"center",fontSize:13,marginTop:20}}>Nessun piatto salvato ancora.</p>
-          :customRecipes.map((r,i)=>(
+          :customRecipes.map((r,i)=>{
+            const portion = suggestPortion(r, mealType);
+            return(
             <button
               key={i}
               onClick={()=>{ addFood(r, mealType); setSearch(""); setScreen("home"); }}
               style={{background:C.card,border:`1px solid ${C.cardBorder}`,borderRadius:12,color:C.text,padding:"12px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
-              <div><div style={{fontSize:14,fontWeight:700}}>{r.name}</div><div style={{fontSize:11,color:C.muted}}>P {r.p}g · C {r.c}g · G {r.f}g</div></div>
+              <div><div style={{fontSize:14,fontWeight:700}}>{r.name}</div><div style={{fontSize:11,color:C.muted}}>P {r.p}g · C {r.c}g · G {r.f}g{portion&&portion.ratio!==1?` · ${portion.label}`:""}</div></div>
               <span style={{color:C.accent,fontWeight:700,fontSize:14}}>{r.kcal} kcal</span>
             </button>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -376,6 +383,12 @@ export default function NutriFox() {
           <div><div style={{color:C.accent,fontSize:22,fontWeight:800}}>{weekAvg}</div><div style={{color:C.muted,fontSize:11}}>media kcal</div></div>
           <div><div style={{color:C.green,fontSize:22,fontWeight:800}}>{days.length}</div><div style={{color:C.muted,fontSize:11}}>giorni log</div></div>
         </div>
+        {insights.trend&&(
+          <div style={{background:`${C.purple}18`,border:`1px solid ${C.purple}44`,borderRadius:14,padding:"10px 14px",marginBottom:16,fontSize:12,color:C.text,display:"flex",alignItems:"center",gap:8}}>
+            <span>{insights.trend.direction==="up"?"📈":insights.trend.direction==="down"?"📉":"➡️"}</span>
+            <span>Trend ultimi {insights.trend.daysLogged} giorni: {insights.trend.direction==="up"?"in aumento":insights.trend.direction==="down"?"in calo":"stabile"} (~{insights.trend.avg} kcal/giorno)</span>
+          </div>
+        )}
         {days.length===0?<p style={{color:C.muted,textAlign:"center",marginTop:60}}>Nessun dato ancora.</p>
         :days.map(([date,data])=>{
           const kcal=sumMacros(data.meals).kcal;
@@ -602,6 +615,23 @@ export default function NutriFox() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Coach — motore di analisi nutrizionale (v1.6) */}
+      <div style={{background:`linear-gradient(160deg,${C.purple}18,${C.card})`,border:`1px solid ${C.purple}44`,borderRadius:18,padding:14,marginBottom:14}}>
+        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
+          <span style={{fontSize:14}}>🧠</span>
+          <span style={{color:C.purple,fontWeight:700,fontSize:13}}>Il consiglio di {foxName}</span>
+        </div>
+        <p style={{color:C.text,fontSize:13,lineHeight:1.4,margin:"0 0 12px"}}>{insights.headline}</p>
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {insights.dailyGoals.map(g=>(
+            <div key={g.id} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:g.done?C.green:C.muted}}>
+              <span style={{fontSize:13}}>{g.done?"✅":"⬜"}</span>
+              <span style={{textDecoration:g.done?"line-through":"none"}}>{g.label}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Bottom nav */}
