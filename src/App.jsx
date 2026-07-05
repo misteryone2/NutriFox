@@ -511,7 +511,7 @@ export default function NutriFox() {
           )}
           {/* Reaction popup — feedback emotivo dopo ogni pasto, 2-3s */}
           {reaction&&(
-            <div style={{position:"absolute",top:-38,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1.5px solid ${reactionColors[reaction.type]||C.purple}`,borderRadius:16,padding:"6px 14px",fontSize:12,fontWeight:600,color:reactionColors[reaction.type]||C.purple,whiteSpace:"nowrap",animation:"reactionPop 2.5s ease-out forwards",boxShadow:`0 4px 14px #00000055`,zIndex:5}}>
+            <div style={{position:"absolute",top:-38,left:"50%",transform:"translateX(-50%)",background:C.card,border:`1.5px solid ${reactionColors[reaction.type]||C.purple}`,borderRadius:16,padding:"6px 14px",fontSize:12,fontWeight:600,color:reactionColors[reaction.type]||C.purple,maxWidth:220,textAlign:"center",lineHeight:1.35,animation:"reactionPop 2.5s ease-out forwards",boxShadow:`0 4px 14px #00000055`,zIndex:5}}>
               {reaction.message}
             </div>
           )}
