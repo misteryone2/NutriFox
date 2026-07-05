@@ -1,6 +1,7 @@
 import { useState, useMemo, memo } from "react";
 import Fox from "./Fox";
 import { useNutriFox, GOALS, sumMacros } from "./useNutriFox";
+import { FOOD_DB, ALL_FOODS } from "./FoodDB";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // App.jsx — v1.4.1
@@ -52,7 +53,7 @@ export default function NutriFox() {
     today, todayData, streak, stage, mood, contextualMessage,
     totalKcal, totalP, totalC, totalF, gKcal, targetWater, weekAvg,
     insights, suggestPortion,
-    categories, getPool, FOOD_DB, ALL_FOODS,
+    categories, getPool,
     addFood, addCustomFood, removeFood, saveRecipe, toggleFavorite,
   } = nf;
 
