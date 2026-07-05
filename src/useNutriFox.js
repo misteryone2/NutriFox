@@ -56,6 +56,7 @@ export const FOOD_DB = {
     { name:"Ceviche di pesce (100g)",   kcal:110, p:18, c:4,  f:2,   type:"protein" },
     { name:"Involtini di pollo (2 pz)", kcal:220, p:26, c:4,  f:11,  type:"protein" },
     { name:"Filetto di merluzzo al vapore", kcal:90, p:19, c:0, f:1, type:"protein" },
+    { name:"Straccetti di manzo (100g)", kcal:190, p:27, c:0, f:9, type:"protein" },
   ],
   "Uova e Latticini": [
     { name:"Uovo intero",               kcal:78,  p:6,  c:0.6,f:5,   type:"protein" },
@@ -727,7 +728,7 @@ export function useNutriFox() {
   const chatEndRef = useRef(null);
 
   // Fox state — happiness, health, lastFedAt, moodIndex (stati intermedi v1.4)
-  const [foxState,  setFoxState]  = useState(()=>load("nf_foxstate",{hunger:50,energy:50,happiness:70,health:90,lastFedAt:null,moodIndex:1}));
+  const [foxState,  setFoxState]  = useState(()=>load("nf_foxstate",{hunger:50,energy:50,happiness:70,health:90,lastFedAt:null,moodIndex:1,lastDecayAt:Date.now()}));
   const [bounce,    setBounce]    = useState(false);
   const [feedLabel, setFeedLabel] = useState("");
   const [reaction,  setReaction]  = useState(null); // {type, message} — popup temporaneo 2-3s
@@ -755,6 +756,29 @@ export function useNutriFox() {
   useEffect(()=>save("nf_celebrated_"+todayKey(),celebratedToday),[celebratedToday]);
   useEffect(()=>save("nf_msgHistory",messageHistory),[messageHistory]);
 
+  // v1.8.1: bug fix — il decay avanzava solo mentre l'app restava aperta
+  // tramite il setInterval sotto. Su mobile si apre, si consulta, si chiude:
+  // il timer si ferma e non recupera mai il tempo trascorso nel frattempo, per
+  // cui fame/energia/felicità sembravano congelate da una sessione all'altra.
+  // Questo effetto, eseguito una sola volta al mount, applica il decay
+  // "arretrato" in base al tempo reale trascorso da lastDecayAt (persistito),
+  // con un tetto di 6 ore per evitare valori assurdi se l'app resta chiusa a
+  // lungo — oltre quella soglia la volpe è comunque già "addormentata" via pose.
+  useEffect(()=>{
+    setFoxState(prev=>{
+      const lastDecay = prev.lastDecayAt || Date.now();
+      const elapsedMin = Math.min(360, Math.max(0, (Date.now()-lastDecay)/60000));
+      if (elapsedMin < 1) return { ...prev, lastDecayAt: Date.now() };
+      const hunger    = Math.min(100, prev.hunger + 2*elapsedMin);
+      const energy    = Math.max(0, prev.energy - 1*elapsedMin);
+      const happiness = hunger > 70 ? Math.max(0, (prev.happiness??70) - 2*elapsedMin) : (prev.happiness??70);
+      const health    = happiness < 30 ? Math.max(0, (prev.health??90) - 1*elapsedMin) : (prev.health??90);
+      const target    = computeTargetMoodIndex(hunger, energy, happiness);
+      const moodIndex = stepMoodIndex(prev.moodIndex, target);
+      return { ...prev, hunger, energy, happiness, health, moodIndex, lastDecayAt: Date.now() };
+    });
+  }, []);
+
   // Decay system leggero: ogni minuto hunger sale, energy scende.
   // moodIndex avanza di un solo gradino per tick verso il mood "target".
   useEffect(()=>{
@@ -766,7 +790,7 @@ export function useNutriFox() {
         const health    = happiness < 30 ? Math.max(0, (prev.health??90)-1) : (prev.health??90);
         const target     = computeTargetMoodIndex(hunger, energy, happiness);
         const moodIndex  = stepMoodIndex(prev.moodIndex, target);
-        return { ...prev, hunger, energy, happiness, health, moodIndex };
+        return { ...prev, hunger, energy, happiness, health, moodIndex, lastDecayAt: Date.now() };
       });
     }, 60000); // ogni minuto
     return ()=>clearInterval(iv);
