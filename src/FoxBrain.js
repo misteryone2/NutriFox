@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { getAnimationIntent } from "./FoxAnimations";
-
+ 
 // ─────────────────────────────────────────────────────────────────────────────
 // useFoxBrain — hook unico che centralizza tutte le derivazioni visive della volpe.
 //
@@ -17,7 +17,7 @@ import { getAnimationIntent } from "./FoxAnimations";
 // unifica questo calcolo in un unico posto puro, usato sia da Fox.jsx (per
 // scegliere l'intent prima di chiamare gli hook) sia da useFoxBrain.
 // ─────────────────────────────────────────────────────────────────────────────
-
+ 
 // Stage in base alla streak
 function deriveStage(streak) {
   if (streak >= 30) return { name:"Leggendaria", color:"#F9C74F", aura:true,  scale:1.12 };
@@ -25,7 +25,7 @@ function deriveStage(streak) {
   if (streak >= 7)  return { name:"Giovane",     color:"#6FCF97", aura:false, scale:1.02 };
   return                   { name:"Cucciolo",    color:"#F4845F", aura:false, scale:1.0  };
 }
-
+ 
 // Trasformazioni CSS corrispondenti alla pose
 function poseToTransform(pose) {
   const map = {
@@ -36,7 +36,7 @@ function poseToTransform(pose) {
   };
   return map[pose] || map.awake;
 }
-
+ 
 // Outfit in base allo stadio
 function deriveColors(streak) {
   if (streak >= 30) return { sw:"#D4A830", swD:"#A07820", pt:"#7C3A0A" };
@@ -44,7 +44,7 @@ function deriveColors(streak) {
   if (streak >= 7)  return { sw:"#16A34A", swD:"#14532D", pt:"#052E16" };
   return                   { sw:"#C8B49A", swD:"#A89278", pt:"#4A3020" };
 }
-
+ 
 // Espressioni per mood — dati puramente visivi, nessuna logica
 // v1.4: aggiunto "content" — stato intermedio tra "neutral" e "happy", usato
 // dal sistema di mood graduale (moodIndex) in App.jsx quando la volpe sta
@@ -72,13 +72,13 @@ const MOOD_EXPR = {
   drowsy:  { bY:2,  bCurve:-1, mouth:"M 46 68 Q 52 70 58 68", eH:0.32, open:true,  cheeksUp:false, mouthFill:false, mouthFillOpacity:0,    sparkleBrows:false, earMood:"down",    sleepy:false, browAsymmetry:0, badge:null },
   sleeping:{ bY:0,  bCurve:0,  mouth:"M 46 67 Q 52 70 58 67", eH:0,    open:false, cheeksUp:false, mouthFill:false, mouthFillOpacity:0,    sparkleBrows:false, earMood:"relaxed", sleepy:true,  browAsymmetry:0, badge:null },
 };
-
+ 
 const EAR_ANGLES = {
   up:      { left:0,   right:0   },
   relaxed: { left:6,   right:-6  },
   down:    { left:14,  right:-14 },
 };
-
+ 
 // Pose fisica pura, senza hook — usata sia da deriveVisualState che da useFoxBrain
 function poseFromHours(hoursSinceLastFed) {
   if (hoursSinceLastFed == null) return "awake";
@@ -87,7 +87,7 @@ function poseFromHours(hoursSinceLastFed) {
   if (hoursSinceLastFed >= 2)   return "sitting";
   return "awake";
 }
-
+ 
 // ─── FUNZIONE PURA CONDIVISA ──────────────────────────────────────────────────
 // Combina il mood "emotivo" (calcolato in App.jsx da hunger/energy/happiness)
 // con la pose fisica (calcolata da quanto tempo è passato dall'ultimo pasto) in
@@ -102,7 +102,7 @@ export function deriveVisualState({ mood, lastFedAt }) {
     : mood;
   return { pose, visualMood, hoursSinceLastFed };
 }
-
+ 
 // ─── HOOK PRINCIPALE ─────────────────────────────────────────────────────────
 // v1.8: il visualMood finale (che ora può includere un'emozione speciale come
 // "proud"/"curious" richiesta dal motore decisionale) viene risolto una sola
@@ -118,14 +118,14 @@ export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, ear
     const intent              = getAnimationIntent(visualMood);
     const ex                  = MOOD_EXPR[visualMood] || MOOD_EXPR.neutral;
     const baseEarAngle        = EAR_ANGLES[ex.earMood] || EAR_ANGLES.up;
-
+ 
     // Le orecchie si abbassano in pose non-awake, reagiscono anche all'earTwitch
     const earAngle = pose !== "awake"
       ? { left: baseEarAngle.left + 10, right: baseEarAngle.right - 10 }
       : earTwitch
         ? { left: baseEarAngle.left + 8, right: baseEarAngle.right }
         : baseEarAngle;
-
+ 
     // Animazione corpo — ora segue la pose reale, non solo il mood emotivo
     // v1.4: "stretch" (si stiracchia) ha priorità subito dopo bounce/hop
     // v1.8: "proud" riusa l'animazione excited (stesso brio, espressione diversa)
@@ -137,13 +137,13 @@ export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, ear
       : visualMood === "sad"      ? "fox-sad"
       : (visualMood === "excited" || visualMood === "proud") ? "fox-excited"
       : "fox-idle";
-
+ 
     // Velocità coda: dipende da intent
     const tailSpeed = intent === "playful" ? "1.8s"
       : intent === "drowsy"                ? "5s"
       : intent === "sleepy"                ? "6s"
       : "3.5s";
-
+ 
     return {
       // per FoxSVG (puramente visivo)
       ex, colors, stage, earAngle,
@@ -154,4 +154,6 @@ export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, ear
     };
   }, [mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood]);
 }
+ 
+ 
 
