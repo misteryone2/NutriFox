@@ -2,7 +2,7 @@ import { useState, useMemo, memo } from "react";
 import Fox from "./Fox";
 import { useNutriFox, GOALS, sumMacros } from "./useNutriFox";
 import { FOOD_DB, ALL_FOODS } from "./FoodDB";
-
+ 
 // ─────────────────────────────────────────────────────────────────────────────
 // App.jsx — v1.4.1
 //
@@ -11,8 +11,16 @@ import { FOOD_DB, ALL_FOODS } from "./FoodDB";
 // della volpe e calcoli nutrizionali vive in useNutriFox.js. Questo file
 // resta responsabile solo di: navigazione tra schermate, stato dei form
 // (input non ancora confermati), e rendering.
+//
+// v1.9: due aggiunte UI, nessun cambio di architettura. Impostazioni: target
+// personalizzato opzionale (calorie/macro) che sovrascrive il calcolo
+// automatico nel profilo unificato. Builder: selettore pasto + pulsante
+// "Suggerisci pasto" che chiama il nuovo motore suggestMealFor e mostra il
+// "Perché questo?" prima di accettare gli ingredienti proposti. La card Coach
+// in home mostra ora anche i traguardi settimanali, accanto a quelli
+// giornalieri già esistenti.
 // ─────────────────────────────────────────────────────────────────────────────
-
+ 
 // ─── PALETTE ──────────────────────────────────────────────────────────────────
 const C = {
   bg:         "#0F0A1A",
@@ -26,7 +34,7 @@ const C = {
   text:       "#F5EFE6",
   muted:      "#8B7BA8",
 };
-
+ 
 // ─── HUNGER/ENERGY BAR ────────────────────────────────────────────────────────
 const StatBar = memo(function StatBar({ label, value, color, icon }) {
   return (
@@ -41,7 +49,7 @@ const StatBar = memo(function StatBar({ label, value, color, icon }) {
     </div>
   );
 });
-
+ 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function NutriFox() {
   const nf = useNutriFox();
@@ -52,11 +60,11 @@ export default function NutriFox() {
     foxState, bounce, feedLabel, reaction, reward, licking, specialEmotion,
     today, todayData, streak, stage, mood, contextualMessage,
     totalKcal, totalP, totalC, totalF, gKcal, targetWater, weekAvg,
-    insights, suggestPortion,
+    insights, suggestPortion, suggestMealFor,
     categories, getPool,
     addFood, addCustomFood, removeFood, saveRecipe, toggleFavorite,
   } = nf;
-
+ 
   // Navigazione + stato dei form (UI-local, non persistito, non business logic)
   const [screen,    setScreen]    = useState("home");
   const [tempName,  setTempName]  = useState("Foxy");
@@ -70,9 +78,11 @@ export default function NutriFox() {
   const [builderIngredients,setBuilderIngredients]=useState([]);
   const [builderSearch,setBuilderSearch]=useState("");
   const [builderCategory,setBuilderCategory]=useState("Tutti");
-
+  const [builderMealType,setBuilderMealType]=useState("Pranzo");
+  const [builderSuggestion,setBuilderSuggestion]=useState(null);
+ 
   const inp={width:"100%",background:"#0F0A1A",border:"1px solid #2D1F45",borderRadius:10,color:C.text,padding:"10px 14px",fontSize:15,boxSizing:"border-box"};
-
+ 
   // Liste filtrate: memoizzate così non si ricalcolano ad ogni render (es.
   // quando cambia solo il popup di reazione dopo un pasto, o durante il decay).
   const pool=getPool(activeCategory);
@@ -87,12 +97,12 @@ export default function NutriFox() {
   );
   const builderTotals = useMemo(()=>sumMacros(builderIngredients),[builderIngredients]);
   const bKcal=builderTotals.kcal, bP=builderTotals.p, bC=builderTotals.c, bF=builderTotals.f;
-
+ 
   // Messaggi di validazione per i form (mancavano in v1.4.1: cliccare "Aggiungi"
   // o "Salva piatto" senza compilare i campi non dava alcun feedback visibile).
   const [customFoodError, setCustomFoodError] = useState("");
   const [recipeError, setRecipeError] = useState("");
-
+ 
   // ── AI COACH SCREEN ─────────────────────────────────────────────────────────
   if(screen==="coach") return(
     <div style={{minHeight:"100vh",background:C.bg,fontFamily:"system-ui,sans-serif",maxWidth:420,margin:"0 auto",display:"flex",flexDirection:"column"}}>
@@ -115,7 +125,7 @@ export default function NutriFox() {
           ))}
         </div>
       </div>
-
+ 
       {/* Chat */}
       <div style={{flex:1,overflowY:"auto",padding:"16px",display:"flex",flexDirection:"column",gap:10}}>
         {aiMessages.length===0&&(
@@ -157,7 +167,7 @@ export default function NutriFox() {
         )}
         <div ref={chatEndRef}/>
       </div>
-
+ 
       {/* Input */}
       <div style={{padding:"12px 16px 32px",background:C.card,borderTop:`1px solid ${C.cardBorder}`}}>
         <div style={{display:"flex",gap:8}}>
@@ -175,11 +185,11 @@ export default function NutriFox() {
         </div>
         <div style={{color:C.muted,fontSize:10,textAlign:"center",marginTop:6}}>Powered by Claude · I dati rimangono sul tuo dispositivo</div>
       </div>
-
+ 
       <style>{`@keyframes dotBounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}@keyframes floatUp{0%{transform:translateX(-50%) translateY(0);opacity:1}100%{transform:translateX(-50%) translateY(-30px);opacity:0}}@keyframes reactionPop{0%{transform:translateX(-50%) translateY(6px) scale(0.9);opacity:0}15%{transform:translateX(-50%) translateY(0) scale(1);opacity:1}80%{transform:translateX(-50%) translateY(0) scale(1);opacity:1}100%{transform:translateX(-50%) translateY(-10px) scale(0.95);opacity:0}}@keyframes rewardPop{0%{transform:translateX(-50%) scale(0.4) rotate(-10deg);opacity:0}25%{transform:translateX(-50%) scale(1.3) rotate(8deg);opacity:1}45%{transform:translateX(-50%) scale(1) rotate(-4deg);opacity:1}100%{transform:translateX(-50%) translateY(-26px) scale(0.9) rotate(0deg);opacity:0}}@keyframes rewardShake{0%,100%{transform:translateX(0)}20%{transform:translateX(-2px)}40%{transform:translateX(2px)}60%{transform:translateX(-1.5px)}80%{transform:translateX(1.5px)}}.reward-shake{animation:rewardShake 0.4s ease-in-out 2}`}</style>
     </div>
   );
-
+ 
   // ── SETUP ────────────────────────────────────────────────────────────────────
   if(!setupDone) return (
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"system-ui,sans-serif",padding:24}}>
@@ -205,7 +215,7 @@ export default function NutriFox() {
       </div>
     </div>
   );
-
+ 
   // ── BUILDER ──────────────────────────────────────────────────────────────────
   if(screen==="builder"){
     const bCats=["Tutti",...Object.keys(FOOD_DB)];
@@ -214,6 +224,33 @@ export default function NutriFox() {
         <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:18}}>
           <button onClick={()=>setScreen("log")} style={{background:C.card,border:`1px solid ${C.cardBorder}`,borderRadius:10,color:C.text,padding:"8px 14px",cursor:"pointer",fontSize:14}}>← Indietro</button>
           <h2 style={{color:C.text,margin:0,fontSize:18,fontWeight:700}}>Crea piatto</h2>
+        </div>
+        <div style={{background:`linear-gradient(160deg,${C.purple}18,${C.card})`,border:`1px solid ${C.purple}44`,borderRadius:16,padding:16,marginBottom:14}}>
+          <div style={{color:C.purple,fontWeight:700,fontSize:13,marginBottom:8}}>🧠 Suggerimento intelligente</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+            {["Colazione","Pranzo","Cena","Spuntino"].map(t=>(
+              <button key={t} onClick={()=>{setBuilderMealType(t);setBuilderSuggestion(null);}} style={{background:builderMealType===t?C.purple:C.bg,border:`1px solid ${builderMealType===t?C.purple:C.cardBorder}`,borderRadius:20,color:"white",padding:"5px 12px",fontSize:12,cursor:"pointer",fontWeight:builderMealType===t?700:400}}>{t}</button>
+            ))}
+          </div>
+          <button onClick={()=>setBuilderSuggestion(suggestMealFor(builderMealType))} style={{width:"100%",background:C.purple,border:"none",borderRadius:10,color:"#0F0A1A",padding:10,fontSize:13,fontWeight:700,cursor:"pointer"}}>
+            Suggerisci pasto per {builderMealType.toLowerCase()}
+          </button>
+          {builderSuggestion&&(
+            <div style={{marginTop:12}}>
+              <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:8}}>
+                {builderSuggestion.items.map((f,i)=>(
+                  <div key={i} style={{background:"#0F0A1A",borderRadius:8,padding:"7px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div style={{fontSize:12,color:C.text}}>{f.name}{f.portionLabel?` · ${f.portionLabel}`:""}</div>
+                    <span style={{color:C.accent,fontSize:12,fontWeight:700}}>{f.kcal} kcal</span>
+                  </div>
+                ))}
+              </div>
+              <p style={{color:C.muted,fontSize:11,lineHeight:1.4,fontStyle:"italic",margin:"0 0 10px"}}>Perché questo? {builderSuggestion.reason}</p>
+              <button onClick={()=>{setBuilderIngredients(p=>[...p,...builderSuggestion.items]);setBuilderSuggestion(null);}} style={{width:"100%",background:C.green,border:"none",borderRadius:9,color:"#0F0A1A",padding:9,fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                Usa questi ingredienti
+              </button>
+            </div>
+          )}
         </div>
         <div style={{background:C.card,border:`1px solid ${C.cardBorder}`,borderRadius:16,padding:16,marginBottom:14}}>
           <label style={{color:C.muted,fontSize:13,display:"block",marginBottom:6}}>Nome del piatto</label>
@@ -274,7 +311,7 @@ export default function NutriFox() {
       </div>
     );
   }
-
+ 
   // ── LOG SCREEN ───────────────────────────────────────────────────────────────
   if(screen==="log") return(
     <div style={{minHeight:"100vh",background:C.bg,fontFamily:"system-ui,sans-serif",maxWidth:420,margin:"0 auto",padding:"20px 16px 40px"}}>
@@ -292,7 +329,7 @@ export default function NutriFox() {
           <button key={k} onClick={()=>setLogMode(k)} style={{flex:1,background:logMode===k?C.accent:"transparent",border:"none",borderRadius:9,color:"white",padding:"8px 4px",fontSize:12,cursor:"pointer",fontWeight:logMode===k?700:400}}>{l}</button>
         ))}
       </div>
-
+ 
       {logMode==="db"&&(
         <>
           <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Cerca alimento..." style={{...inp,marginBottom:10}}/>
@@ -326,7 +363,7 @@ export default function NutriFox() {
           </div>
         </>
       )}
-
+ 
       {logMode==="recipes"&&(
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
           <button onClick={()=>setScreen("builder")} style={{background:"#F4845F11",border:`2px dashed ${C.accent}`,borderRadius:14,color:C.accent,padding:14,fontSize:14,fontWeight:700,cursor:"pointer"}}>+ Crea nuovo piatto</button>
@@ -345,7 +382,7 @@ export default function NutriFox() {
           })}
         </div>
       )}
-
+ 
       {logMode==="custom"&&(
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
           {[["name","Nome","text"],["kcal","Calorie (kcal)","number"],["p","Proteine (g)","number"],["c","Carboidrati (g)","number"],["f","Grassi (g)","number"]].map(([k,label,type])=>(
@@ -369,7 +406,7 @@ export default function NutriFox() {
       )}
     </div>
   );
-
+ 
   // ── HISTORY ──────────────────────────────────────────────────────────────────
   if(screen==="history"){
     const days=Object.entries(dailyLog).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,14);
@@ -410,7 +447,7 @@ export default function NutriFox() {
       </div>
     );
   }
-
+ 
   // ── SETTINGS ─────────────────────────────────────────────────────────────────
   if(screen==="settings") return(
     <div style={{minHeight:"100vh",background:C.bg,fontFamily:"system-ui,sans-serif",maxWidth:420,margin:"0 auto",padding:"20px 16px"}}>
@@ -458,10 +495,24 @@ export default function NutriFox() {
           ))}
         </div>
       </div>
+      <div style={{background:C.card,border:`1px solid ${C.cardBorder}`,borderRadius:16,padding:20,marginBottom:14}}>
+        <p style={{color:C.muted,fontSize:13,margin:"0 0 4px"}}>Target personalizzato (opzionale)</p>
+        <p style={{color:C.muted,fontSize:11,margin:"0 0 10px",lineHeight:1.4}}>Se lo lasci vuoto, calorie e macro restano calcolati in automatico dal tuo profilo e obiettivo.</p>
+        <label style={{color:C.muted,fontSize:12,display:"block",marginBottom:4}}>Calorie giornaliere</label>
+        <input type="number" value={profile.customKcal||""} placeholder={`Automatico (${gKcal})`} onChange={e=>setProfile(p=>({...p,customKcal:e.target.value}))} style={{...inp,marginBottom:10}}/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+          {[["proteinTargetG","Prot. (g)"],["carbTargetG","Carb. (g)"],["fatTargetG","Grassi (g)"]].map(([k,l])=>(
+            <div key={k}>
+              <label style={{color:C.muted,fontSize:11,display:"block",marginBottom:4}}>{l}</label>
+              <input type="number" value={profile.customMacros?.[k]||""} onChange={e=>setProfile(p=>({...p,customMacros:{...p.customMacros,[k]:e.target.value}}))} style={inp}/>
+            </div>
+          ))}
+        </div>
+      </div>
       <button onClick={()=>{if(window.confirm("Cancellare tutti i dati?")){localStorage.clear();window.location.reload();}}} style={{width:"100%",background:"#C0392B22",border:"1px solid #C0392B",borderRadius:12,color:"#C0392B",padding:12,fontSize:14,fontWeight:600,cursor:"pointer"}}>Cancella tutti i dati</button>
     </div>
   );
-
+ 
   // ── HOME ──────────────────────────────────────────────────────────────────────
   const moodLabels={happy:"Soddisfatta",excited:"Euforica!",content:"Serena",neutral:"Tranquilla",sad:"Ho fame...",proud:"Orgogliosa!",curious:"Curiosa"};
   const moodEmoji ={happy:"😊",excited:"🤩",content:"🙂",neutral:"😌",sad:"😟",proud:"🏆",curious:"🤔"};
@@ -472,10 +523,10 @@ export default function NutriFox() {
   const energyColor=foxState.energy>60?C.green:foxState.energy>30?C.gold:C.accent;
   const happinessColor=(foxState.happiness??70)>60?C.green:(foxState.happiness??70)>30?C.gold:C.accent;
   const reactionColors={happy:C.green,energetic:C.gold,neutral:C.purple,sad:C.accent,relieved:C.blue};
-
+ 
   return(
     <div style={{minHeight:"100vh",background:C.bg,fontFamily:"system-ui,sans-serif",maxWidth:420,margin:"0 auto",padding:"16px 16px 100px"}}>
-
+ 
       {/* Header */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
         <div>
@@ -487,21 +538,21 @@ export default function NutriFox() {
           <button onClick={()=>setScreen("settings")} aria-label="Impostazioni" style={{background:C.card,border:`1px solid ${C.cardBorder}`,borderRadius:10,color:C.muted,padding:"8px 10px",cursor:"pointer",fontSize:16}}>⚙️</button>
         </div>
       </div>
-
+ 
       {/* FOX CARD — central and dominant: lo stato emotivo è ora il focus primario */}
       <div className={reward?"reward-shake":""} style={{background:`linear-gradient(160deg,${C.card} 0%,#120D20 100%)`,border:`1px solid ${stage.aura?C.gold:C.cardBorder}`,borderRadius:28,padding:"20px 16px",marginBottom:14,textAlign:"center",position:"relative",overflow:"hidden"}}>
         {/* background glow */}
         <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:200,height:200,background:`radial-gradient(circle,${stage.color}18 0%,transparent 70%)`,pointerEvents:"none"}}/>
-
+ 
         <div style={{position:"absolute",top:14,right:16,background:`${stage.color}22`,border:`1px solid ${stage.color}`,borderRadius:20,padding:"3px 10px",fontSize:11,color:stage.color,fontWeight:700}}>{stage.name}</div>
-
+ 
         {/* Effetto ricompensa — meno di 2s, sopra tutta la card */}
         {reward&&(
           <div style={{position:"absolute",top:10,left:"50%",transform:"translateX(-50%)",fontSize:30,animation:"rewardPop 1.7s ease-out forwards",pointerEvents:"none",zIndex:6}}>
             {reward.icon}
           </div>
         )}
-
+ 
         {/* Fox + reaction popup + feed label */}
         <div style={{position:"relative",display:"inline-block"}}>
           <Fox mood={mood} streak={streak} size={160} bounce={bounce} lastFedAt={foxState.lastFedAt} licking={licking} specialEmotion={specialEmotion}/>
@@ -517,7 +568,7 @@ export default function NutriFox() {
             </div>
           )}
         </div>
-
+ 
         {/* Stato emotivo — fumetto con dialogo contestuale, sostituisce l'etichetta generica */}
         <div style={{color:C.text,fontWeight:700,fontSize:16,marginTop:4}}>{foxName}</div>
         <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginBottom:8}}>
@@ -530,14 +581,14 @@ export default function NutriFox() {
         <button onClick={()=>setScreen("coach")} style={{background:`linear-gradient(135deg,${C.purple}33,${C.purple}11)`,border:`1px solid ${C.purple}55`,borderRadius:20,color:C.purple,padding:"6px 18px",fontSize:12,fontWeight:700,cursor:"pointer",marginBottom:14,transition:"all 0.2s"}}>
           Parla con {foxName} ✨
         </button>
-
+ 
         {/* Fox stats — ora 3 barre: fame, energia, felicità */}
         <div style={{display:"flex",gap:10,marginBottom:14}}>
           <StatBar label="Fame" value={foxState.hunger} color={hungerColor} icon="🍽️"/>
           <StatBar label="Energia" value={foxState.energy} color={energyColor} icon="⚡"/>
           <StatBar label="Felicità" value={foxState.happiness??70} color={happinessColor} icon="💖"/>
         </div>
-
+ 
         {/* Streak progress */}
         {streak<30&&(
           <div>
@@ -552,7 +603,7 @@ export default function NutriFox() {
         )}
         {streak>=30&&<div style={{color:C.gold,fontSize:12,fontWeight:700}}>Hai raggiunto il massimo!</div>}
       </div>
-
+ 
       {/* Calorie card — peso visivo leggermente ridotto, la volpe resta il focus */}
       <div style={{background:C.card,border:`1px solid ${C.cardBorder}`,borderRadius:18,padding:"13px 16px",marginBottom:14,opacity:0.92}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
@@ -578,7 +629,7 @@ export default function NutriFox() {
         </div>
         {weekAvg>0&&<div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.cardBorder}`,display:"flex",justifyContent:"space-between"}}><span style={{color:C.muted,fontSize:12}}>Media settimana</span><span style={{color:C.purple,fontSize:12,fontWeight:700}}>{weekAvg} kcal/giorno</span></div>}
       </div>
-
+ 
       {/* Water */}
       <div style={{background:C.card,border:`1px solid ${C.cardBorder}`,borderRadius:18,padding:14,marginBottom:14}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
@@ -594,7 +645,7 @@ export default function NutriFox() {
           <div style={{height:"100%",width:`${Math.min((water/targetWater)*100,100)}%`,background:`linear-gradient(90deg,${C.blue},#38BDF8)`,borderRadius:2,transition:"width 0.4s"}}/>
         </div>
       </div>
-
+ 
       {/* Meals */}
       <div style={{background:C.card,border:`1px solid ${C.cardBorder}`,borderRadius:18,padding:14,marginBottom:14}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
@@ -620,7 +671,7 @@ export default function NutriFox() {
           </div>
         )}
       </div>
-
+ 
       {/* Coach — motore di analisi nutrizionale (v1.6) */}
       <div style={{background:`linear-gradient(160deg,${C.purple}18,${C.card})`,border:`1px solid ${C.purple}44`,borderRadius:18,padding:14,marginBottom:14}}>
         <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
@@ -636,8 +687,21 @@ export default function NutriFox() {
             </div>
           ))}
         </div>
+        {insights.weeklyGoals?.length>0 && (
+          <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.purple}33`}}>
+            <div style={{color:C.purple,fontWeight:700,fontSize:11,marginBottom:6}}>Traguardi della settimana</div>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {insights.weeklyGoals.map(g=>(
+                <div key={g.id} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:g.done?C.green:C.muted}}>
+                  <span style={{fontSize:13}}>{g.done?"✅":"⬜"}</span>
+                  <span>{g.label}{typeof g.progress==="number"?` (${g.progress}/7)`:""}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
-
+ 
       {/* Bottom nav */}
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:420,background:C.card,borderTop:`1px solid ${C.cardBorder}`,display:"flex",justifyContent:"space-around",alignItems:"center",padding:"10px 0 22px"}}>
         <button onClick={()=>setScreen("home")} style={{background:"none",border:"none",color:screen==="home"?C.accent:C.muted,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,fontSize:10}}>
@@ -654,3 +718,5 @@ export default function NutriFox() {
     </div>
   );
 }
+ 
+
