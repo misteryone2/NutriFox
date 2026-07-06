@@ -1,12 +1,16 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// FoodDB.js — v1.8.2
+// FoodDB.js — v1.9
 //
 // Database alimenti e derivazione ALL_FOODS, estratti da useNutriFox.js dove
 // erano già isolati e pronti per questo passaggio fin dalla v1.4.1. Nessun
 // dato cambiato, solo spostato: questo file non contiene alcuna logica,
 // solo dati e la derivazione piatta usata per ricerca/filtri.
+//
+// v1.9: +10 alimenti (249 totali) mirati a completare i pool usati dal nuovo
+// Meal Builder intelligente — contorni/verdure, cereali "carb", proteine
+// magre pronte e opzioni bilanciate per colazione/spuntino.
 // ─────────────────────────────────────────────────────────────────────────────
-
+ 
 export const FOOD_DB = {
   "Carne e Pesce": [
     { name:"Petto di pollo",            kcal:165, p:31, c:0,  f:3.6, type:"protein" },
@@ -46,6 +50,8 @@ export const FOOD_DB = {
     { name:"Filetto di merluzzo al vapore", kcal:90, p:19, c:0, f:1, type:"protein" },
     { name:"Straccetti di manzo (100g)", kcal:190, p:27, c:0, f:9, type:"protein" },
     { name:"Hamburger di manzo al naturale (100g)", kcal:215, p:26, c:0, f:12, type:"protein" },
+    { name:"Petto di pollo alla piastra (100g)", kcal:160, p:31, c:0, f:3.2, type:"protein" },
+    { name:"Bocconcini di tacchino saltati (100g)", kcal:145, p:30, c:0, f:2, type:"protein" },
   ],
   "Uova e Latticini": [
     { name:"Uovo intero",               kcal:78,  p:6,  c:0.6,f:5,   type:"protein" },
@@ -99,6 +105,9 @@ export const FOOD_DB = {
     { name:"Avena (porridge 200ml)",    kcal:150, p:5,  c:27, f:3,   type:"carb"    },
     { name:"Crackers (5 pz)",           kcal:110, p:2.5,c:18, f:3.5, type:"carb"    },
     { name:"Pasta alla carbonara",      kcal:460, p:18, c:55, f:18,  type:"carb"    },
+    { name:"Pasta integrale al pomodoro", kcal:310, p:12, c:56, f:3, type:"carb"    },
+    { name:"Riso basmati (100g cotto)", kcal:135, p:2.9,c:29, f:0.3, type:"carb"    },
+    { name:"Cous cous (100g cotto)",    kcal:112, p:3.8,c:23, f:0.2, type:"carb"    },
   ],
   "Verdure e Legumi": [
     { name:"Insalata mista",            kcal:15,  p:1,  c:2,  f:0.2, type:"light"   },
@@ -134,6 +143,9 @@ export const FOOD_DB = {
     { name:"Melanzane a funghetto",     kcal:90,  p:2,  c:8,  f:6,   type:"light"   },
     { name:"Zucca al forno (150g)",     kcal:65,  p:1.5,c:14, f:0.3, type:"light"   },
     { name:"Hummus di ceci fatto in casa (50g)", kcal:120, p:4.5,c:9,  f:8,  type:"protein" },
+    { name:"Insalata di finocchi e arance (150g)", kcal:60, p:1.5,c:13, f:0.3, type:"light" },
+    { name:"Verdure grigliate miste (150g)", kcal:70,  p:2,  c:9,  f:2.5, type:"light" },
+    { name:"Puré di patate (100g)",      kcal:105, p:2,  c:16, f:3.5, type:"carb"    },
   ],
   "Frutta": [
     { name:"Mela",                      kcal:72,  p:0.4,c:19, f:0.2, type:"light"   },
@@ -235,6 +247,8 @@ export const FOOD_DB = {
     { name:"Pistacchi (30g)",           kcal:175, p:6,  c:8,  f:14,  type:"fat"     },
     { name:"Mandorle (30g)",            kcal:175, p:6,  c:6,  f:15,  type:"fat"     },
     { name:"Rice cake (2 pz)",          kcal:70,  p:1.5,c:15, f:0.5, type:"carb"    },
+    { name:"Yogurt greco proteico (170g)", kcal:110, p:17, c:6,  f:1.5, type:"protein" },
+    { name:"Fiocchi d'avena con frutta (200ml)", kcal:210, p:7,  c:36, f:4, type:"carb" },
     { name:"Torta di mele (fetta)",     kcal:280, p:4,  c:42, f:11,  type:"carb"    },
     { name:"Tiramisù (porzione)",       kcal:380, p:7,  c:38, f:22,  type:"fat"     },
     { name:"Panna cotta",               kcal:220, p:3,  c:25, f:12,  type:"fat"     },
@@ -268,7 +282,9 @@ export const FOOD_DB = {
     { name:"Acqua di cocco (250ml)",    kcal:60,  p:1,  c:14, f:0,   type:"light"   },
   ],
 };
-
+ 
 export const ALL_FOODS = Object.entries(FOOD_DB).flatMap(([cat,items]) =>
   items.map(f => ({ ...f, _cat: cat }))
 );
+ 
+
