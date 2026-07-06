@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-
+ 
 // ─────────────────────────────────────────────────────────────────────────────
 // FoxAnimations.js — scheduler unico per le micro-animazioni idle.
 //
@@ -17,9 +17,9 @@ import { useState, useEffect, useRef } from "react";
 // l'intent "drowsy" (assopita, non ancora addormentata) e piccola variabilità
 // sulle durate degli eventi.
 // ─────────────────────────────────────────────────────────────────────────────
-
+ 
 const TICK_MIN = 550, TICK_MAX = 950; // risoluzione dello scheduler, con jitter
-
+ 
 // Intent → pesi relativi degli eventi disponibili. Più alto = più probabile.
 // "idle": comportamento di base, sveglia ma tranquilla
 // "playful": eccitata, eventi più frequenti e vivaci
@@ -36,24 +36,24 @@ const INTENT_WEIGHTS = {
   sleepy:  { look:0, tilt:0, tailFlick:0, earTwitch:0, hop:0, yawn:0, stretch:0 },
   alert:   { look:1, tilt:1, tailFlick:0, earTwitch:1, hop:0, yawn:0, stretch:0 },
 };
-
+ 
 // Probabilità di "non far nulla" anche quando un evento sarebbe disponibile.
 // Più alta per gli stati calmi, più bassa per playful così si sente più viva.
 const NOTHING_PROB = { idle:0.5, playful:0.22, drowsy:0.78, alert:0.68, sleepy:1 };
-
+ 
 // Cooldown minimo (ms) tra due eventi dello stesso tipo
 const COOLDOWNS = { look:4000, tilt:5000, tailFlick:3000, earTwitch:3500, hop:9000, yawn:16000, stretch:22000 };
 // Durata di ogni evento una volta attivato (poi variata con un po' di jitter)
 const DURATIONS = { look:1200, tilt:1500, tailFlick:600, earTwitch:500, hop:500, yawn:1400, stretch:900 };
 // Tra un evento "corpo" e l'altro lasciamo un minimo di respiro per non sovrapporli
 const GLOBAL_EVENT_GAP = 1800;
-
+ 
 // Varia un valore ms di ±pct in modo che nessun movimento duri sempre uguale
 function jitter(ms, pct = 0.25) {
   const delta = ms * pct;
   return Math.round(ms - delta + Math.random() * delta * 2);
 }
-
+ 
 export function getAnimationIntent(mood) {
   if (mood === "sleeping") return "sleepy";
   if (mood === "drowsy") return "drowsy";
@@ -61,7 +61,7 @@ export function getAnimationIntent(mood) {
   if (mood === "excited" || mood === "proud") return "playful";
   return "idle"; // include "curious": tranquilla ma sveglia, coerente con l'idea di notare qualcosa
 }
-
+ 
 function pickWeightedEvent(weights) {
   const entries = Object.entries(weights).filter(([,w]) => w > 0);
   const total = entries.reduce((s,[,w]) => s+w, 0);
@@ -73,7 +73,7 @@ function pickWeightedEvent(weights) {
   }
   return null;
 }
-
+ 
 export function useFoxAnimations(intent, hoursSinceLastFed = null) {
   const [blink,     setBlink]     = useState(false);
   const [lookOffset,setLookOffset]= useState({ x: 0, y: 0 });
@@ -83,11 +83,11 @@ export function useFoxAnimations(intent, hoursSinceLastFed = null) {
   const [hop,       setHop]       = useState(false);
   const [yawn,      setYawn]      = useState(false);
   const [stretch,   setStretch]   = useState(false);
-
+ 
   const lastFired   = useRef({ look:0, tilt:0, tailFlick:0, earTwitch:0, hop:0, yawn:0, stretch:0 });
   const lastAnyBody = useRef(0); // ultimo evento "corpo" (esclude blink) per evitare stacking
   const eventTimers  = useRef([]);
-
+ 
   // ── Blink: indipendente dallo scheduler principale, leggero e non esclusivo ──
   // v1.4: durante "drowsy" il blink rallenta progressivamente in base a quante ore
   // sono passate dall'ultimo pasto — l'effetto "occhi sempre più pesanti" prima di
@@ -101,7 +101,7 @@ export function useFoxAnimations(intent, hoursSinceLastFed = null) {
           return [3200 + t*2200, 6000 + t*3500];
         })()
       : [2500,6000];
-
+ 
     function scheduleBlink() {
       const delay = speed[0] + Math.random()*(speed[1]-speed[0]);
       const t = setTimeout(() => {
@@ -116,7 +116,7 @@ export function useFoxAnimations(intent, hoursSinceLastFed = null) {
     scheduleBlink();
     return () => { active = false; };
   }, [intent, hoursSinceLastFed]);
-
+ 
   // ── Scheduler unico per gli eventi "corpo" (look/tilt/tail/ear/hop) ──────────
   // v1.3.2: loop a setTimeout ricorsivo con intervallo variabile (jitter), invece
   // di un setInterval fisso — evita la cadenza "a metronomo" che rendeva la volpe
@@ -124,24 +124,24 @@ export function useFoxAnimations(intent, hoursSinceLastFed = null) {
   useEffect(() => {
     const weights = INTENT_WEIGHTS[intent] || INTENT_WEIGHTS.idle;
     if (Object.values(weights).every(w => w === 0)) return; // sleepy: nessun evento
-
+ 
     const nothingProb = NOTHING_PROB[intent] ?? 0.5;
     let active = true;
     let tickTimer = null;
-
+ 
     function scheduleTick() {
       const delay = TICK_MIN + Math.random() * (TICK_MAX - TICK_MIN);
       tickTimer = setTimeout(runTick, delay);
       eventTimers.current.push(tickTimer);
     }
-
+ 
     function runTick() {
       if (!active) return;
       const now = Date.now();
-
+ 
       // mutua esclusione: non avviare un nuovo evento corpo se uno è appena partito
       if (now - lastAnyBody.current < GLOBAL_EVENT_GAP) { scheduleTick(); return; }
-
+ 
       // candidati disponibili = peso > 0 E cooldown rispettato
       const available = {};
       for (const key of Object.keys(weights)) {
@@ -150,13 +150,13 @@ export function useFoxAnimations(intent, hoursSinceLastFed = null) {
         }
       }
       const chosen = pickWeightedEvent(available);
-
+ 
       // probabilità di "non fare nulla" comunque, diversa per ogni stato d'animo
       if (!chosen || Math.random() < nothingProb) { scheduleTick(); return; }
-
+ 
       lastFired.current[chosen] = now;
       lastAnyBody.current = now;
-
+ 
       if (chosen === "look") {
         const x = (Math.random()*5-2.5), y = (Math.random()*2-1);
         setLookOffset({ x, y });
@@ -188,23 +188,25 @@ export function useFoxAnimations(intent, hoursSinceLastFed = null) {
         const t = setTimeout(() => { if(active) setStretch(false); }, jitter(DURATIONS.stretch, 0.15));
         eventTimers.current.push(t);
       }
-
+ 
       scheduleTick();
     }
-
+ 
     scheduleTick();
     return () => { active = false; if (tickTimer) clearTimeout(tickTimer); };
   }, [intent]);
-
+ 
   // Reset pose quando si entra in sleepy, e cleanup generale allo smontaggio
   useEffect(() => {
     if (intent === "sleepy") {
       setLookOffset({x:0,y:0}); setHeadTilt(0); setTailFlick(false); setEarTwitch(false); setHop(false); setYawn(false); setStretch(false);
     }
   }, [intent]);
-
+ 
   useEffect(() => () => { eventTimers.current.forEach(t => clearTimeout(t)); }, []);
-
+ 
   return { blink, lookOffset, headTilt, tailFlick, earTwitch, hop, yawn, stretch };
 }
+ 
+ 
 
