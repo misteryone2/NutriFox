@@ -3,7 +3,7 @@ import { getFoxStage } from "./Fox";
 import { FOOD_DB, ALL_FOODS } from "./FoodDB";
  
 // ─────────────────────────────────────────────────────────────────────────────
-// useNutriFox.js — v1.8.2
+// useNutriFox.js — v1.9.1
 //
 // Release di consolidamento tecnico: tutta la logica di business che prima
 // viveva dentro App.jsx (gestione pasti, idratazione, statistiche, dialoghi,
@@ -27,6 +27,14 @@ import { FOOD_DB, ALL_FOODS } from "./FoodDB";
 // dove possibile, e già nella forma dati "fatti strutturati" che una futura
 // AI potrà limitarsi a tradurre in linguaggio naturale — lo stesso principio
 // già seguito dal motore di analisi nutrizionale v1.6.
+//
+// v1.9.1: rifinitura — unificazione definitiva della memoria comportamentale.
+// getMealRoutine e la vecchia getFoodMemoryCount (ora getWeeklyFoodCounts)
+// erano ancora invocate direttamente da buildReactionCandidates e
+// buildAmbientContext, duplicando scansioni del diario già fatte da
+// getUserMemory. Ora ogni superficie legge solo da userMemory: zero doppi
+// calcoli, un'unica fonte di verità per la memoria. Nessun cambio di
+// comportamento visibile, solo di dove viene letto il dato.
 // ─────────────────────────────────────────────────────────────────────────────
  
 // ─── STORAGE ──────────────────────────────────────────────────────────────────
@@ -173,23 +181,30 @@ function lastNDayKeys(n, offset=0) {
  
 // Quante volte un dato alimento è stato mangiato negli ultimi 7 giorni
 // (oggi incluso). Usata per frasi tipo "È il terzo yogurt questa settimana!".
-function getFoodMemoryCount(dailyLog, foodName) {
-  let count = 0;
+// v1.9.1: sostituita da getWeeklyFoodCounts — un'unica scansione del diario
+// che produce la mappa nome->conteggio per TUTTI gli alimenti della
+// settimana, invece di una scansione ripetuta per ogni singolo alimento
+// interrogato (ambient lo faceva per ogni pasto di oggi, la reazione per
+// l'alimento appena registrato). Calcolata una sola volta dentro
+// getUserMemory, mai più invocata direttamente altrove.
+function getWeeklyFoodCounts(dailyLog) {
+  const counts = {};
   for (const key of lastNDayKeys(7)) {
     const meals = dailyLog[key]?.meals || [];
-    count += meals.filter(m => m.name === foodName).length;
+    meals.forEach(m => { counts[m.name] = (counts[m.name]||0)+1; });
   }
-  return count;
+  return counts;
 }
 
-// ─── MEMORIA COMPORTAMENTALE (v1.9) ────────────────────────────────────────────
-// Prima ogni pattern comportamentale era calcolato ad hoc, dove serviva:
-// getMealRoutine veniva invocata solo per "Colazione" (buildAmbientContext),
-// getFoodMemoryCount solo sui pasti già registrati oggi. getUserMemory
-// consolida questi stessi pattern — più idratazione e trend, già esistenti
-// altrove — in un'unica struttura dati riutilizzabile da qualunque superficie
-// (didascalia ambient, coach, meal builder), calcolata una sola volta e
-// memoizzata sul diario.
+// ─── MEMORIA COMPORTAMENTALE (v1.9 · unificata in v1.9.1) ──────────────────────
+// v1.9 introduceva getUserMemory ma alcune superfici (buildReactionCandidates,
+// buildAmbientContext) continuavano a scansionare il diario per conto proprio
+// con getMealRoutine/getFoodMemoryCount, duplicando calcoli già fatti qui.
+// v1.9.1 chiude il cerchio: da questa versione getMealRoutine è chiamata SOLO
+// da getUserMemory, e getFoodMemoryCount non esiste più — sostituita da
+// getWeeklyFoodCounts, anch'essa invocata solo qui. Ogni altra superficie
+// (ambient, reazione al pasto, coach, meal builder) legge esclusivamente da
+// userMemory, mai più dal dailyLog grezzo per questi scopi.
 
 // Alimenti più ricorrenti negli ultimi `days` giorni (soglia minima 2 volte,
 // altrimenti non è ancora un'abitudine riconoscibile).
@@ -226,6 +241,7 @@ function getUserMemory(dailyLog) {
       Spuntino:  getMealRoutine(dailyLog, "Spuntino"),
     },
     topFoods: getTopFoods(dailyLog),
+    foodCounts: getWeeklyFoodCounts(dailyLog),
     hydration: getHydrationPattern(),
   };
 }
@@ -256,18 +272,21 @@ function getMealRoutine(dailyLog, mealType) {
 // non è una libreria statica valutata automaticamente: dipende dal singolo
 // alimento appena registrato, quindi viene costruita al volo — ma la scelta
 // finale passa dallo stesso pickTopPriority condiviso.
-function buildReactionCandidates({ reactionType, foodName, dailyLog, mealType, waitedLong }) {
+// v1.9.1: legge esclusivamente da userMemory (già calcolata una volta
+// nell'hook), non riceve più dailyLog e non scansiona più nulla da sé —
+// stessa logica di prima, una sola fonte di verità per la memoria.
+function buildReactionCandidates({ reactionType, foodName, userMemory, mealType, waitedLong }) {
   const candidates = [
     { priority:5, text: pickReaction(reactionType, foodName) }, // presenza leggera, sempre disponibile
   ];
   if (waitedLong) {
     candidates.push({ priority:1, text: pickReaction("relieved", foodName) }); // avviso importante: aspettava da ore
   }
-  const memoryCount = getFoodMemoryCount(dailyLog, foodName);
+  const memoryCount = userMemory?.foodCounts?.[foodName] || 0;
   if (memoryCount >= 3) {
     candidates.push({ priority:3, text: `È ${ordinalIt(memoryCount)} ${foodName} questa settimana!` }); // riconoscimento
   }
-  const routine = getMealRoutine(dailyLog, mealType);
+  const routine = userMemory?.mealRoutines?.[mealType];
   if (routine) {
     const diff = Math.abs(new Date().getHours() - routine.avgHour);
     if (diff <= 1) candidates.push({ priority:3, text: `Puntuale come sempre, ${mealType.toLowerCase()} verso le ${routine.avgHour}!` });
@@ -326,9 +345,10 @@ const AMBIENT_MESSAGES = [
 // il pattern di idratazione arrivano già pronti da getUserMemory (calcolato
 // una sola volta nell'hook), invece di essere ricalcolati qui.
 function buildAmbientContext(base) {
-  const { dailyLog, todayMeals, userMemory } = base;
+  const { todayMeals, userMemory } = base;
+  const counts = userMemory?.foodCounts || {};
   const frequentFood = todayMeals?.length
-    ? todayMeals.map(m => ({ name:m.name, count:getFoodMemoryCount(dailyLog, m.name) })).find(f => f.count>=3) || null
+    ? todayMeals.map(m => ({ name:m.name, count:counts[m.name]||0 })).find(f => f.count>=3) || null
     : null;
   const routines = userMemory?.mealRoutines || {};
   const hyd = userMemory?.hydration;
@@ -913,7 +933,7 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
     const waitedLong = hoursSinceLastFed != null && hoursSinceLastFed >= 5;
     const reactionType = waitedLong ? "relieved" : effect.reaction;
     const message = buildReactionCandidates({
-      reactionType, foodName:food.name, dailyLog, mealType, waitedLong,
+      reactionType, foodName:food.name, userMemory, mealType, waitedLong,
     });
     setFoxState(prev=>{
       const hunger    = Math.max(0,prev.hunger+effect.hungerDelta);
