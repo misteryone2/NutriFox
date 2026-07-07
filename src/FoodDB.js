@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// FoodDB.js — v1.9
+// FoodDB.js — v1.9.1
 //
 // Database alimenti e derivazione ALL_FOODS, estratti da useNutriFox.js dove
 // erano già isolati e pronti per questo passaggio fin dalla v1.4.1. Nessun
@@ -9,6 +9,9 @@
 // v1.9: +10 alimenti (249 totali) mirati a completare i pool usati dal nuovo
 // Meal Builder intelligente — contorni/verdure, cereali "carb", proteine
 // magre pronte e opzioni bilanciate per colazione/spuntino.
+//
+// v1.9.1: +3 alimenti (252 totali) — salmone al forno e ceci in insalata
+// (altre proteine per il Meal Builder), tè verde.
 // ─────────────────────────────────────────────────────────────────────────────
  
 export const FOOD_DB = {
@@ -52,6 +55,7 @@ export const FOOD_DB = {
     { name:"Hamburger di manzo al naturale (100g)", kcal:215, p:26, c:0, f:12, type:"protein" },
     { name:"Petto di pollo alla piastra (100g)", kcal:160, p:31, c:0, f:3.2, type:"protein" },
     { name:"Bocconcini di tacchino saltati (100g)", kcal:145, p:30, c:0, f:2, type:"protein" },
+    { name:"Salmone al forno (100g)",   kcal:206, p:22, c:0, f:13,  type:"protein" },
   ],
   "Uova e Latticini": [
     { name:"Uovo intero",               kcal:78,  p:6,  c:0.6,f:5,   type:"protein" },
@@ -146,6 +150,7 @@ export const FOOD_DB = {
     { name:"Insalata di finocchi e arance (150g)", kcal:60, p:1.5,c:13, f:0.3, type:"light" },
     { name:"Verdure grigliate miste (150g)", kcal:70,  p:2,  c:9,  f:2.5, type:"light" },
     { name:"Puré di patate (100g)",      kcal:105, p:2,  c:16, f:3.5, type:"carb"    },
+    { name:"Ceci in insalata (100g)",    kcal:120, p:7,  c:18, f:2,   type:"protein" },
   ],
   "Frutta": [
     { name:"Mela",                      kcal:72,  p:0.4,c:19, f:0.2, type:"light"   },
@@ -280,6 +285,7 @@ export const FOOD_DB = {
     { name:"Tè freddo limone (330ml)",  kcal:110, p:0,  c:27, f:0,   type:"carb"    },
     { name:"Kombucha (250ml)",          kcal:55,  p:0,  c:14, f:0,   type:"light"   },
     { name:"Acqua di cocco (250ml)",    kcal:60,  p:1,  c:14, f:0,   type:"light"   },
+    { name:"Tè verde (250ml)",          kcal:2,   p:0,  c:0.5,f:0,   type:"light"   },
   ],
 };
  
