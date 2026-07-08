@@ -3,7 +3,7 @@ import { getFoxStage } from "./Fox";
 import { FOOD_DB, ALL_FOODS } from "./FoodDB";
  
 // ─────────────────────────────────────────────────────────────────────────────
-// useNutriFox.js — v1.9.1
+// useNutriFox.js — v1.9.2
 //
 // Release di consolidamento tecnico: tutta la logica di business che prima
 // viveva dentro App.jsx (gestione pasti, idratazione, statistiche, dialoghi,
@@ -529,15 +529,21 @@ function getWeeklyGoals(dailyLog, gKcal, hydration) {
   return goals;
 }
 
-// ─── MEAL BUILDER INTELLIGENTE (v1.9) ──────────────────────────────────────────
+// ─── MEAL BUILDER INTELLIGENTE (v1.9 · iterativo dalla v1.9.2) ─────────────────
 // Il builder esisteva già dalla v1.4.1, ma componeva solo ciò che l'utente
-// sceglieva manualmente. suggestMeal propone un pasto completo (2-3
-// ingredienti, grammature dinamiche) mirato a colmare il macronutriente più
-// carente della giornata, con lo stesso budget calorico per pasto già usato
-// da suggestPortion (MEAL_SHARE). Puro e deterministico: a parità di input,
-// stesso output, mai un pescaggio casuale — così sarà riutilizzabile anche da
-// una futura AI, che si limiterà a tradurre `reason` (già un fatto
-// strutturato, qui reso in italiano da un template) in un tono più naturale.
+// sceglieva manualmente. Dalla v1.9 suggestMeal propone un pasto completo
+// (2-3 ingredienti, grammature dinamiche) mirato a colmare il macronutriente
+// più carente della giornata, con lo stesso budget calorico per pasto già
+// usato da suggestPortion (MEAL_SHARE).
+//
+// v1.9.2: il builder diventa iterativo — rigenera, sostituisci un singolo
+// ingrediente, blocca quelli che piacciono, evita quelli già mangiati oggi.
+// Nessuna AI, nessun pescaggio casuale: ogni "candidato successivo" è
+// semplicemente il prossimo elemento della stessa classifica deterministica
+// (per proteine/carboidrati) non ancora escluso — a parità di esclusioni,
+// stesso risultato, sempre riproducibile. mealBudget/pickFirstEligible/
+// composeMealItems sono condivisi da generazione, rigenerazione e
+// sostituzione: nessuna logica duplicata tra le tre azioni.
 
 const MEAL_TYPE_POOLS = {
   Colazione: ["Uova e Latticini", "Colazione e Snack", "Frutta"],
@@ -545,25 +551,58 @@ const MEAL_TYPE_POOLS = {
   Cena:      ["Carne e Pesce",    "Verdure e Legumi",   "Pasta e Cereali"],
   Spuntino:  ["Frutta",           "Colazione e Snack",  "Uova e Latticini"],
 };
+// Peso calorico di ciascuno slot nel pasto — normalizzato dinamicamente sugli
+// slot effettivamente presenti (composeMealItems), così un pasto a 2
+// ingredienti (es. carboidrato saltato per "grassi mancanti") resta coerente.
+const SLOT_WEIGHTS = { main:0.5, carb:0.35, side:0.15 };
 
-function pickBestFood(pool, sortKey, exclude=[]) {
-  const filtered = pool.filter(f => f.kcal>0 && !exclude.includes(f));
-  if (!filtered.length) return null;
-  return [...filtered].sort((a,b)=>(b[sortKey]||0)-(a[sortKey]||0))[0];
+function sortByKey(pool, key) {
+  return [...pool.filter(f=>f.kcal>0)].sort((a,b)=>(b[key]||0)-(a[key]||0));
 }
 // Per il componente "carboidrato" del pasto si preferiscono alimenti con
 // type:"carb" — altrimenti ordinare per soli grammi di carboidrati
 // premierebbe dolci/dessert (es. Tiramisù) solo perché più zuccherini.
-function pickCarbFood(pool, exclude=[]) {
-  const carbTyped = pool.filter(f => f.type==="carb" && f.kcal>0 && !exclude.includes(f));
-  const base = carbTyped.length ? carbTyped : pool.filter(f => f.kcal>0 && !exclude.includes(f));
-  if (!base.length) return null;
-  return [...base].sort((a,b)=>(b.c||0)-(a.c||0))[0];
+function sortCarb(pool) {
+  const carbTyped = pool.filter(f => f.type==="carb" && f.kcal>0);
+  const base = carbTyped.length ? carbTyped : pool.filter(f=>f.kcal>0);
+  return [...base].sort((a,b)=>(b.c||0)-(a.c||0));
 }
 
-// Grammatura dinamica per un ingrediente del pasto suggerito — stessa scala
-// PORTION_STEPS/PORTION_LABELS di suggestPortion, qui applicata alla quota di
-// budget calorico assegnata a quell'ingrediente specifico.
+// Classifiche ordinate (non solo il primo) per i 3 slot del pasto — condivise
+// da generazione, rigenerazione e sostituzione: cambia solo quale candidato
+// della stessa lista viene scelto, mai il criterio di ordinamento.
+function buildMealSlots(mealType, foodDB) {
+  const cats = MEAL_TYPE_POOLS[mealType] || Object.keys(foodDB);
+  const sideCat = foodDB[cats[2]]||[];
+  const lightSide = sideCat.filter(f=>f.type==="light");
+  return {
+    main: sortByKey(foodDB[cats[0]]||[], "p"),
+    carb: sortCarb(foodDB[cats[1]]||[]),
+    side: sortByKey(lightSide.length?lightSide:sideCat, "c"),
+  };
+}
+
+// Primo candidato della lista non ancora escluso (già mangiato oggi, già
+// mostrato in questa sessione di suggerimenti, o già usato in un altro slot).
+// Se la lista si esaurisce, si ricomincia dal primo — un pasto ripetuto è
+// comunque meglio di nessun pasto, e la maggior parte delle categorie ha
+// abbastanza voci da non arrivarci mai in pratica.
+function pickFirstEligible(sortedList, excludeNames) {
+  if (!sortedList.length) return null;
+  return sortedList.find(f => !excludeNames.includes(f.name)) || sortedList[0];
+}
+
+// Budget calorico per il pasto indicato — stessa formula per generazione,
+// rigenerazione e sostituzione singola (nessuna duplicazione).
+function mealBudget(mealType, gKcal, totalKcal) {
+  const share = MEAL_SHARE[mealType] ?? 0.25;
+  const remaining = Math.max(0, gKcal-totalKcal);
+  return Math.max(250, Math.min(remaining>0?remaining:gKcal*share, gKcal*share*1.4));
+}
+
+// Grammatura dinamica per un ingrediente del pasto — stessa scala
+// PORTION_STEPS/PORTION_LABELS di suggestPortion, applicata alla quota di
+// budget assegnata a quello slot.
 function scalePortionForBudget(food, kcalBudget) {
   let ratio = kcalBudget/food.kcal;
   ratio = Math.max(0.5, Math.min(2, ratio));
@@ -572,39 +611,89 @@ function scalePortionForBudget(food, kcalBudget) {
   return { ratio, label: parsed ? `~${Math.round(parsed.amount*ratio)}${parsed.unit}` : PORTION_LABELS[ratio] };
 }
 
-function suggestMeal({ mealType, gKcal, totalKcal, totalP, totalC, totalF, targets, foodDB }) {
-  const cats = MEAL_TYPE_POOLS[mealType] || Object.keys(foodDB);
-  const share = MEAL_SHARE[mealType] ?? 0.25;
-  const remaining = Math.max(0, gKcal-totalKcal);
-  const budget = Math.max(250, Math.min(remaining>0?remaining:gKcal*share, gKcal*share*1.4));
-
-  const missing = analyzeMissingNutrient({ totalP, totalC, totalF, targets });
-  const mainPool = foodDB[cats[0]]||[];
-  const carbPool = foodDB[cats[1]]||[];
-  const sideCat  = foodDB[cats[2]]||[];
-
-  const main = pickBestFood(mainPool, "p");
-  const avoidCarb = missing?.nutrient==="grassi"; // in quel caso non serve altro carboidrato
-  const carb = !avoidCarb ? pickCarbFood(carbPool, [main]) : null;
-  const lightSide = sideCat.filter(f => f.type==="light");
-  const side = pickBestFood(lightSide.length?lightSide:sideCat, "c", [main,carb]);
-
-  const items = [main, carb, side].filter(Boolean);
-  if (!items.length) return null;
-
-  const shares = items.length===3 ? [0.5,0.35,0.15] : items.length===2 ? [0.65,0.35] : [1];
-  const composed = items.map((f,i)=>{
-    const portion = scalePortionForBudget(f, budget*shares[i]);
+// Compone gli item finali (con grammatura e valori calorici scalati) a
+// partire dagli alimenti scelti per ciascuno slot presente. I valori
+// originali dell'alimento (kcal/p/c/f "per porzione base") restano intatti
+// sotto disp*, così un pasto può essere ricomposto più volte (rigenera,
+// sostituisci) senza mai comporre errori a catena sulle grammature.
+function composeMealItems(slotFoods, budget) {
+  const present = Object.entries(slotFoods).filter(([,f])=>f);
+  const totalWeight = present.reduce((s,[slot])=>s+(SLOT_WEIGHTS[slot]||0), 0) || 1;
+  return present.map(([slot,food])=>{
+    const share = (SLOT_WEIGHTS[slot]||0)/totalWeight;
+    const portion = scalePortionForBudget(food, budget*share);
     const r = portion.ratio;
-    return { ...f, kcal:Math.round(f.kcal*r), p:Math.round((f.p||0)*r*10)/10, c:Math.round((f.c||0)*r*10)/10, f:Math.round((f.f||0)*r*10)/10, portionLabel:portion.label };
+    return {
+      ...food, _slot:slot, portionRatio:r, portionLabel:portion.label,
+      dispKcal: Math.round(food.kcal*r),
+      dispP:    Math.round((food.p||0)*r*10)/10,
+      dispC:    Math.round((food.c||0)*r*10)/10,
+      dispF:    Math.round((food.f||0)*r*10)/10,
+    };
   });
-  const totals = sumMacros(composed);
+}
+
+function sumDispTotals(items) {
+  return {
+    kcal: items.reduce((s,i)=>s+i.dispKcal,0),
+    p:    Math.round(items.reduce((s,i)=>s+i.dispP,0)*10)/10,
+    c:    Math.round(items.reduce((s,i)=>s+i.dispC,0)*10)/10,
+    f:    Math.round(items.reduce((s,i)=>s+i.dispF,0)*10)/10,
+  };
+}
+
+// Genera (o rigenera) un pasto completo. `excludeNames` copre sia gli
+// alimenti già mangiati oggi sia quelli già mostrati in questa sessione di
+// suggerimenti (evita ingredienti appena usati). `lockedFoods` mantiene gli
+// slot che l'utente ha bloccato perché gli piacciono, invariati nella scelta
+// dell'alimento (la grammatura può comunque adattarsi al budget residuo).
+function suggestMeal({ mealType, gKcal, totalKcal, totalP, totalC, totalF, targets, foodDB, excludeNames=[], lockedFoods={} }) {
+  const budget = mealBudget(mealType, gKcal, totalKcal);
+  const missing = analyzeMissingNutrient({ totalP, totalC, totalF, targets });
+  const slots = buildMealSlots(mealType, foodDB);
+
+  const picked = { main:null, carb:null, side:null };
+  const used = [...excludeNames];
+
+  ["main","carb","side"].forEach(slot=>{
+    if (lockedFoods[slot]) { picked[slot]=lockedFoods[slot]; used.push(lockedFoods[slot].name); return; }
+    if (slot==="carb" && missing?.nutrient==="grassi") return; // in quel caso non serve altro carboidrato
+    const candidate = pickFirstEligible(slots[slot], used);
+    if (candidate) { picked[slot]=candidate; used.push(candidate.name); }
+  });
+
+  const items = composeMealItems(picked, budget);
+  if (!items.length) return null;
+  const totals = sumDispTotals(items);
+  const mainItem = items.find(i=>i._slot==="main") || items[0];
 
   const reason = missing
-    ? `Ti mancano ancora circa ${missing.missingGrams}g di ${missing.nutrient} oggi: ${main.name.toLowerCase()} aiuta a colmarli. Budget stimato per ${mealType.toLowerCase()}: ~${Math.round(budget)} kcal, da cui le grammature.`
+    ? `Ti mancano ancora circa ${missing.missingGrams}g di ${missing.nutrient} oggi: ${mainItem.name.toLowerCase()} aiuta a colmarli. Budget stimato per ${mealType.toLowerCase()}: ~${Math.round(budget)} kcal, da cui le grammature.`
     : `I tuoi macro di oggi sono già ben bilanciati: ho proposto un pasto vario. Budget stimato per ${mealType.toLowerCase()}: ~${Math.round(budget)} kcal, da cui le grammature.`;
 
-  return { items: composed, totals, reason };
+  return { items, totals, reason, mealType };
+}
+
+// Sostituisce un singolo slot della proposta corrente, lasciando gli altri
+// esattamente come sono (stesso alimento — la grammatura può cambiare di
+// poco per via del ribilanciamento del budget tra gli slot presenti).
+function substituteMealIngredient({ suggestion, slot, gKcal, totalKcal, foodDB, excludeNames=[] }) {
+  const mealType = suggestion.mealType;
+  const slots = buildMealSlots(mealType, foodDB);
+  const currentNames = suggestion.items.map(i=>i.name);
+  const candidate = pickFirstEligible(slots[slot], [...excludeNames, ...currentNames]);
+  if (!candidate) return suggestion; // nessuna alternativa idonea: meglio non cambiare nulla
+
+  const kept = {};
+  suggestion.items.forEach(i => { if (i._slot!==slot) kept[i._slot]=i; });
+  kept[slot] = candidate;
+
+  const budget = mealBudget(mealType, gKcal, totalKcal);
+  const items = composeMealItems(kept, budget);
+  const totals = sumDispTotals(items);
+  const reason = `Ho sostituito con ${candidate.name.toLowerCase()}, lasciando invariato il resto del pasto.`;
+
+  return { ...suggestion, items, totals, reason };
 }
  
 // Punto di ingresso unico del motore: combina tutte le analisi e sceglie il
@@ -825,10 +914,21 @@ export function useNutriFox() {
   }
 
   // v1.9: propone un pasto completo per il tipo indicato, mirato a colmare
-  // il macro più carente della giornata. Non memoizzata (chiamata solo su
-  // tap del pulsante "Suggerisci pasto", non ad ogni render).
-  function suggestMealFor(mealType) {
-    return suggestMeal({ mealType, gKcal, totalKcal, totalP, totalC, totalF, targets, foodDB: FOOD_DB });
+  // il macro più carente della giornata. v1.9.2: accetta anche esclusioni
+  // (già mostrate in questa sessione) e slot bloccati dall'utente, ed evita
+  // sempre gli alimenti già registrati oggi ("appena usati"). Non memoizzata
+  // (chiamata solo su tap dei pulsanti del builder, non ad ogni render).
+  function suggestMealFor(mealType, { excludeNames=[], lockedFoods={} } = {}) {
+    const eatenToday = todayData.meals.map(m=>m.name);
+    return suggestMeal({ mealType, gKcal, totalKcal, totalP, totalC, totalF, targets, foodDB: FOOD_DB, excludeNames:[...eatenToday, ...excludeNames], lockedFoods });
+  }
+
+  // v1.9.2: sostituisce un solo ingrediente della proposta corrente (uno
+  // slot: main/carb/side), lasciando gli altri invariati. Evita comunque gli
+  // alimenti già mangiati oggi e quelli già mostrati in questa sessione.
+  function substituteMealIngredientFor(suggestion, slot, excludeNames=[]) {
+    const eatenToday = todayData.meals.map(m=>m.name);
+    return substituteMealIngredient({ suggestion, slot, gKcal, totalKcal, foodDB: FOOD_DB, excludeNames:[...eatenToday, ...excludeNames] });
   }
  
   // Effetti di ricompensa: si attivano una sola volta per evento al giorno.
@@ -988,8 +1088,8 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
     // motore di analisi nutrizionale (v1.6) — insights include ora anche
     // weeklyGoals (v1.9)
     insights, suggestPortion: suggestPortionFor,
-    // meal builder intelligente (v1.9)
-    suggestMealFor,
+    // meal builder intelligente (v1.9, iterativo dalla v1.9.2)
+    suggestMealFor, substituteMealIngredientFor,
     // alimenti
     categories, getPool,
     // azioni
