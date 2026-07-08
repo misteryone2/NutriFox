@@ -19,6 +19,14 @@ import { FOOD_DB, ALL_FOODS } from "./FoodDB";
 // "Perché questo?" prima di accettare gli ingredienti proposti. La card Coach
 // in home mostra ora anche i traguardi settimanali, accanto a quelli
 // giornalieri già esistenti.
+//
+// v1.9.2: il riquadro "Suggerimento intelligente" diventa iterativo. Ogni
+// ingrediente ha un tasto blocca (🔒/🔓, resta invariato con "Rigenera") e un
+// tasto sostituisci (🔄, cambia solo quel singolo ingrediente). "Rigenera
+// proposta" ricompone l'intero pasto rispettando i blocchi ed evitando gli
+// alimenti già mostrati in questa sessione — la logica di esclusione vive
+// interamente in useNutriFox.js, qui solo lo stato locale di sessione
+// (builderLocked/builderShownNames) e il rendering.
 // ─────────────────────────────────────────────────────────────────────────────
  
 // ─── PALETTE ──────────────────────────────────────────────────────────────────
@@ -60,7 +68,7 @@ export default function NutriFox() {
     foxState, bounce, feedLabel, reaction, reward, licking, specialEmotion,
     today, todayData, streak, stage, mood, contextualMessage,
     totalKcal, totalP, totalC, totalF, gKcal, targetWater, weekAvg,
-    insights, suggestPortion, suggestMealFor,
+    insights, suggestPortion, suggestMealFor, substituteMealIngredientFor,
     categories, getPool,
     addFood, addCustomFood, removeFood, saveRecipe, toggleFavorite,
   } = nf;
@@ -80,6 +88,8 @@ export default function NutriFox() {
   const [builderCategory,setBuilderCategory]=useState("Tutti");
   const [builderMealType,setBuilderMealType]=useState("Pranzo");
   const [builderSuggestion,setBuilderSuggestion]=useState(null);
+  const [builderLocked,setBuilderLocked]=useState({});      // { main:true, carb:false, side:true }
+  const [builderShownNames,setBuilderShownNames]=useState([]); // nomi già proposti in questa sessione
  
   const inp={width:"100%",background:"#0F0A1A",border:"1px solid #2D1F45",borderRadius:10,color:C.text,padding:"10px 14px",fontSize:15,boxSizing:"border-box"};
  
@@ -229,26 +239,60 @@ export default function NutriFox() {
           <div style={{color:C.purple,fontWeight:700,fontSize:13,marginBottom:8}}>🧠 Suggerimento intelligente</div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
             {["Colazione","Pranzo","Cena","Spuntino"].map(t=>(
-              <button key={t} onClick={()=>{setBuilderMealType(t);setBuilderSuggestion(null);}} style={{background:builderMealType===t?C.purple:C.bg,border:`1px solid ${builderMealType===t?C.purple:C.cardBorder}`,borderRadius:20,color:"white",padding:"5px 12px",fontSize:12,cursor:"pointer",fontWeight:builderMealType===t?700:400}}>{t}</button>
+              <button key={t} onClick={()=>{setBuilderMealType(t);setBuilderSuggestion(null);setBuilderLocked({});setBuilderShownNames([]);}} style={{background:builderMealType===t?C.purple:C.bg,border:`1px solid ${builderMealType===t?C.purple:C.cardBorder}`,borderRadius:20,color:"white",padding:"5px 12px",fontSize:12,cursor:"pointer",fontWeight:builderMealType===t?700:400}}>{t}</button>
             ))}
           </div>
-          <button onClick={()=>setBuilderSuggestion(suggestMealFor(builderMealType))} style={{width:"100%",background:C.purple,border:"none",borderRadius:10,color:"#0F0A1A",padding:10,fontSize:13,fontWeight:700,cursor:"pointer"}}>
+          <button onClick={()=>{
+            const s=suggestMealFor(builderMealType);
+            setBuilderSuggestion(s);
+            setBuilderLocked({});
+            setBuilderShownNames(s?s.items.map(f=>f.name):[]);
+          }} style={{width:"100%",background:C.purple,border:"none",borderRadius:10,color:"#0F0A1A",padding:10,fontSize:13,fontWeight:700,cursor:"pointer"}}>
             Suggerisci pasto per {builderMealType.toLowerCase()}
           </button>
           {builderSuggestion&&(
             <div style={{marginTop:12}}>
               <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:8}}>
-                {builderSuggestion.items.map((f,i)=>(
-                  <div key={i} style={{background:"#0F0A1A",borderRadius:8,padding:"7px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <div style={{fontSize:12,color:C.text}}>{f.name}{f.portionLabel?` · ${f.portionLabel}`:""}</div>
-                    <span style={{color:C.accent,fontSize:12,fontWeight:700}}>{f.kcal} kcal</span>
-                  </div>
-                ))}
+                {builderSuggestion.items.map((f,i)=>{
+                  const locked = !!builderLocked[f._slot];
+                  return (
+                    <div key={i} style={{background:"#0F0A1A",borderRadius:8,padding:"7px 10px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                      <div style={{fontSize:12,color:C.text,flex:1,minWidth:0}}>
+                        <div style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.name}</div>
+                        {f.portionLabel&&<div style={{color:C.muted,fontSize:10}}>{f.portionLabel}</div>}
+                      </div>
+                      <span style={{color:C.accent,fontSize:12,fontWeight:700,flexShrink:0}}>{f.dispKcal} kcal</span>
+                      <button onClick={()=>setBuilderLocked(p=>({...p,[f._slot]:!p[f._slot]}))} aria-label={locked?"Sblocca ingrediente":"Blocca ingrediente"} title={locked?"Sblocca":"Blocca (non cambierà con Rigenera)"} style={{background:"none",border:"none",cursor:"pointer",fontSize:15,flexShrink:0,opacity:locked?1:0.4}}>{locked?"🔒":"🔓"}</button>
+                      <button onClick={()=>{
+                        const updated=substituteMealIngredientFor(builderSuggestion, f._slot, builderShownNames);
+                        setBuilderSuggestion(updated);
+                        setBuilderShownNames(p=>[...p, ...updated.items.map(x=>x.name)]);
+                      }} disabled={locked} aria-label={`Sostituisci ${f.name}`} title="Sostituisci questo ingrediente" style={{background:"none",border:"none",cursor:locked?"not-allowed":"pointer",fontSize:14,flexShrink:0,opacity:locked?0.25:0.8}}>🔄</button>
+                    </div>
+                  );
+                })}
               </div>
               <p style={{color:C.muted,fontSize:11,lineHeight:1.4,fontStyle:"italic",margin:"0 0 10px"}}>Perché questo? {builderSuggestion.reason}</p>
-              <button onClick={()=>{setBuilderIngredients(p=>[...p,...builderSuggestion.items]);setBuilderSuggestion(null);}} style={{width:"100%",background:C.green,border:"none",borderRadius:9,color:"#0F0A1A",padding:9,fontSize:13,fontWeight:700,cursor:"pointer"}}>
-                Usa questi ingredienti
-              </button>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>{
+                  const lockedFoods={};
+                  builderSuggestion.items.forEach(f=>{ if(builderLocked[f._slot]) lockedFoods[f._slot]=f; });
+                  const carryNames = builderSuggestion.items.filter(f=>!builderLocked[f._slot]).map(f=>f.name);
+                  const s=suggestMealFor(builderMealType, { excludeNames:[...builderShownNames,...carryNames], lockedFoods });
+                  setBuilderSuggestion(s);
+                  setBuilderShownNames(p=>[...p, ...(s?s.items.map(f=>f.name):[])]);
+                }} style={{flex:1,background:C.bg,border:`1px solid ${C.purple}`,borderRadius:9,color:C.purple,padding:9,fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                  🔁 Rigenera proposta
+                </button>
+                <button onClick={()=>{
+                  setBuilderIngredients(p=>[...p,...builderSuggestion.items.map(f=>({ name:f.name, kcal:f.dispKcal, p:f.dispP, c:f.dispC, f:f.dispF, type:f.type, portionLabel:f.portionLabel }))]);
+                  setBuilderSuggestion(null);
+                  setBuilderLocked({});
+                  setBuilderShownNames([]);
+                }} style={{flex:1,background:C.green,border:"none",borderRadius:9,color:"#0F0A1A",padding:9,fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                  Usa questi ingredienti
+                </button>
+              </div>
             </div>
           )}
         </div>
