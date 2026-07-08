@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// FoodDB.js — v1.9.1
+// FoodDB.js — v1.9.2
 //
 // Database alimenti e derivazione ALL_FOODS, estratti da useNutriFox.js dove
 // erano già isolati e pronti per questo passaggio fin dalla v1.4.1. Nessun
@@ -12,6 +12,10 @@
 //
 // v1.9.1: +3 alimenti (252 totali) — salmone al forno e ceci in insalata
 // (altre proteine per il Meal Builder), tè verde.
+//
+// v1.9.2: +2 alimenti (254 totali) — orzo perlato (varietà nel pool "carb"
+// del Meal Builder ora iterativo, utile quando si sostituisce/rigenera) e
+// fiocchi di latte (proteina leggera per colazione/spuntino).
 // ─────────────────────────────────────────────────────────────────────────────
  
 export const FOOD_DB = {
@@ -75,6 +79,7 @@ export const FOOD_DB = {
     { name:"Latte intero (200ml)",      kcal:130, p:6.6,c:9.6,f:7.4, type:"fat"     },
     { name:"Latte scremato (200ml)",    kcal:70,  p:6.8,c:9.8,f:0.2, type:"light"   },
     { name:"Burrata",                   kcal:330, p:15, c:2,  f:30,  type:"fat"     },
+    { name:"Fiocchi di latte (100g)",   kcal:98,  p:12, c:3,  f:4.3, type:"protein" },
   ],
   "Pasta e Cereali": [
     { name:"Pasta al pomodoro",         kcal:350, p:12, c:65, f:5,   type:"carb"    },
@@ -112,6 +117,7 @@ export const FOOD_DB = {
     { name:"Pasta integrale al pomodoro", kcal:310, p:12, c:56, f:3, type:"carb"    },
     { name:"Riso basmati (100g cotto)", kcal:135, p:2.9,c:29, f:0.3, type:"carb"    },
     { name:"Cous cous (100g cotto)",    kcal:112, p:3.8,c:23, f:0.2, type:"carb"    },
+    { name:"Orzo perlato (100g cotto)", kcal:123, p:2.3,c:28, f:0.4, type:"carb"    },
   ],
   "Verdure e Legumi": [
     { name:"Insalata mista",            kcal:15,  p:1,  c:2,  f:0.2, type:"light"   },
