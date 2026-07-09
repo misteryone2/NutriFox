@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// FoodDB.js — v1.9.2
+// FoodDB.js — v1.9.3
 //
 // Database alimenti e derivazione ALL_FOODS, estratti da useNutriFox.js dove
 // erano già isolati e pronti per questo passaggio fin dalla v1.4.1. Nessun
@@ -16,6 +16,10 @@
 // v1.9.2: +2 alimenti (254 totali) — orzo perlato (varietà nel pool "carb"
 // del Meal Builder ora iterativo, utile quando si sostituisce/rigenera) e
 // fiocchi di latte (proteina leggera per colazione/spuntino).
+//
+// v1.9.3: +2 alimenti (256 totali) — muesli con frutta secca e kiwi, scelti
+// per avere più coppie plausibili da riconoscere come "combinazioni
+// ricorrenti" nella memoria alimentare arricchita di questa versione.
 // ─────────────────────────────────────────────────────────────────────────────
  
 export const FOOD_DB = {
@@ -180,6 +184,7 @@ export const FOOD_DB = {
     { name:"Frutto della passione (2)", kcal:48,  p:2,  c:11, f:0.4, type:"light"   },
     { name:"Fico (2 pz)",               kcal:74,  p:0.8,c:19, f:0.3, type:"light"   },
     { name:"Cocco (30g)",               kcal:106, p:1,  c:4,  f:10,  type:"fat"     },
+    { name:"Kiwi (2 pz)",               kcal:84,  p:1.6,c:20, f:0.6, type:"light"   },
   ],
   "Sughi e Condimenti": [
     { name:"Sugo al pomodoro (100g)",   kcal:45,  p:1.5,c:8,  f:1.2, type:"light"   },
@@ -266,6 +271,7 @@ export const FOOD_DB = {
     { name:"Pancake (2)",               kcal:220, p:6,  c:34, f:7,   type:"carb"    },
     { name:"Porridge alla frutta",      kcal:230, p:7,  c:38, f:5,   type:"carb"    },
     { name:"Skyr naturale (150g)",      kcal:95,  p:16, c:6,  f:0.3, type:"protein" },
+    { name:"Muesli con frutta secca (60g)", kcal:245, p:6, c:38, f:8, type:"carb"   },
   ],
   "Bevande": [
     { name:"Acqua",                     kcal:0,   p:0,  c:0,  f:0,   type:"light"   },
