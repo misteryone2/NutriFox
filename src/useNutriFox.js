@@ -3,7 +3,7 @@ import { getFoxStage } from "./Fox";
 import { FOOD_DB, ALL_FOODS } from "./FoodDB";
  
 // ─────────────────────────────────────────────────────────────────────────────
-// useNutriFox.js — v1.9.2
+// useNutriFox.js — v1.9.3
 //
 // Release di consolidamento tecnico: tutta la logica di business che prima
 // viveva dentro App.jsx (gestione pasti, idratazione, statistiche, dialoghi,
@@ -35,6 +35,23 @@ import { FOOD_DB, ALL_FOODS } from "./FoodDB";
 // getUserMemory. Ora ogni superficie legge solo da userMemory: zero doppi
 // calcoli, un'unica fonte di verità per la memoria. Nessun cambio di
 // comportamento visibile, solo di dove viene letto il dato.
+//
+// v1.9.2: il Meal Builder diventa iterativo — rigenera, sostituisci un
+// singolo ingrediente, blocca quello che piace, evita sempre gli alimenti
+// già mangiati oggi. Nuove funzioni condivise (buildMealSlots,
+// pickFirstEligible, mealBudget, composeMealItems) usate sia dalla
+// generazione iniziale sia dalla rigenerazione sia dalla sostituzione:
+// nessuna logica duplicata tra le tre azioni. Ancora zero AI, zero casualità.
+//
+// v1.9.3: la memoria per singolo alimento smette di essere un semplice
+// contatore. getFoodMemory sostituisce sia la vecchia getTopFoods (contava
+// solo su 30gg) sia getWeeklyFoodCounts (solo su 7gg, scansione separata)
+// con un'unica scansione che produce, per ogni alimento: ultimo utilizzo,
+// frequenza settimanale, frequenza mensile, pasto preferito. Nuova
+// getRecurringCombos rileva le combinazioni di alimenti che ricorrono nello
+// stesso pasto. topFoods/foodCounts restano esposti per compatibilità con le
+// superfici esistenti, ma derivano ora da getFoodMemory — mai più da una
+// scansione propria.
 // ─────────────────────────────────────────────────────────────────────────────
  
 // ─── STORAGE ──────────────────────────────────────────────────────────────────
@@ -179,46 +196,101 @@ function lastNDayKeys(n, offset=0) {
   return keys;
 }
  
-// Quante volte un dato alimento è stato mangiato negli ultimi 7 giorni
-// (oggi incluso). Usata per frasi tipo "È il terzo yogurt questa settimana!".
-// v1.9.1: sostituita da getWeeklyFoodCounts — un'unica scansione del diario
-// che produce la mappa nome->conteggio per TUTTI gli alimenti della
-// settimana, invece di una scansione ripetuta per ogni singolo alimento
-// interrogato (ambient lo faceva per ogni pasto di oggi, la reazione per
-// l'alimento appena registrato). Calcolata una sola volta dentro
-// getUserMemory, mai più invocata direttamente altrove.
-function getWeeklyFoodCounts(dailyLog) {
-  const counts = {};
-  for (const key of lastNDayKeys(7)) {
-    const meals = dailyLog[key]?.meals || [];
-    meals.forEach(m => { counts[m.name] = (counts[m.name]||0)+1; });
-  }
-  return counts;
-}
-
-// ─── MEMORIA COMPORTAMENTALE (v1.9 · unificata in v1.9.1) ──────────────────────
+// ─── MEMORIA COMPORTAMENTALE (v1.9 · unificata in v1.9.1 · arricchita in v1.9.3) ─
 // v1.9 introduceva getUserMemory ma alcune superfici (buildReactionCandidates,
 // buildAmbientContext) continuavano a scansionare il diario per conto proprio
 // con getMealRoutine/getFoodMemoryCount, duplicando calcoli già fatti qui.
-// v1.9.1 chiude il cerchio: da questa versione getMealRoutine è chiamata SOLO
-// da getUserMemory, e getFoodMemoryCount non esiste più — sostituita da
-// getWeeklyFoodCounts, anch'essa invocata solo qui. Ogni altra superficie
-// (ambient, reazione al pasto, coach, meal builder) legge esclusivamente da
-// userMemory, mai più dal dailyLog grezzo per questi scopi.
+// v1.9.1 ha chiuso il cerchio: getMealRoutine è chiamata SOLO da getUserMemory,
+// e getFoodMemoryCount non esiste più. Ogni altra superficie (ambient,
+// reazione al pasto, coach, meal builder) legge esclusivamente da userMemory.
+//
+// v1.9.3: la memoria per singolo alimento non era più un semplice contatore
+// da un pezzo (getTopFoods contava solo occorrenze su 30gg, getWeeklyFoodCounts
+// solo su 7gg — due scansioni separate dello stesso diario). getFoodMemory le
+// sostituisce entrambe con un'unica scansione che produce, per ogni alimento
+// visto negli ultimi 60 giorni: ultimo utilizzo, frequenza settimanale,
+// frequenza mensile, e il pasto in cui compare più spesso. getRecurringCombos
+// aggiunge le combinazioni di alimenti che ricorrono nello stesso pasto.
+// topFoods e foodCounts restano esposti (compatibilità con le superfici
+// esistenti) ma sono ora derivati da getFoodMemory, non da scansioni proprie.
 
-// Alimenti più ricorrenti negli ultimi `days` giorni (soglia minima 2 volte,
-// altrimenti non è ancora un'abitudine riconoscibile).
-function getTopFoods(dailyLog, days=30, limit=5) {
-  const counts = {};
+// Memoria per singolo alimento: un'unica scansione del diario produce, per
+// ogni nome visto negli ultimi `days` giorni, tutti i fatti che prima
+// richiedevano scansioni separate. Restituisce una mappa nome->record per
+// lookup O(1) da qualunque superficie (coach, reazione, meal builder, futura
+// AI che dovrà solo tradurre questi fatti in linguaggio naturale).
+function getFoodMemory(dailyLog, days=60) {
+  const weekKeys  = new Set(lastNDayKeys(7));
+  const monthKeys = new Set(lastNDayKeys(30));
+  const byName = {};
+
   for (const key of lastNDayKeys(days)) {
     const meals = dailyLog[key]?.meals || [];
-    meals.forEach(m => { counts[m.name] = (counts[m.name]||0)+1; });
+    meals.forEach(m => {
+      const rec = byName[m.name] || { name:m.name, lastUsed:null, weekCount:0, monthCount:0, totalCount:0, mealCounts:{} };
+      if (!rec.lastUsed || key > rec.lastUsed) rec.lastUsed = key;
+      if (weekKeys.has(key))  rec.weekCount++;
+      if (monthKeys.has(key)) rec.monthCount++;
+      rec.totalCount++;
+      rec.mealCounts[m.meal] = (rec.mealCounts[m.meal]||0)+1;
+      byName[m.name] = rec;
+    });
   }
-  return Object.entries(counts)
-    .filter(([,c]) => c>=2)
+
+  Object.values(byName).forEach(rec => {
+    const sortedMeals = Object.entries(rec.mealCounts).sort((a,b)=>b[1]-a[1]);
+    rec.preferredMeal = sortedMeals[0]?.[0] || null;
+  });
+
+  return byName;
+}
+
+// Alimenti più ricorrenti (soglia minima 2 volte nel mese, altrimenti non è
+// ancora un'abitudine riconoscibile) — derivato da getFoodMemory, non da una
+// scansione propria.
+function getTopFoods(foodMemory, limit=5) {
+  return Object.values(foodMemory)
+    .filter(r => r.monthCount>=2)
+    .sort((a,b) => b.monthCount-a.monthCount)
+    .slice(0,limit)
+    .map(r => ({ name:r.name, count:r.monthCount }));
+}
+
+// Mappa nome->conteggio settimanale, per compatibilità con le superfici che
+// consultano solo la frequenza dei 7 giorni (reazione al pasto, ambient) —
+// anche questa derivata da getFoodMemory, mai da una scansione propria.
+function getWeeklyFoodCounts(foodMemory) {
+  const counts = {};
+  Object.values(foodMemory).forEach(r => { counts[r.name] = r.weekCount; });
+  return counts;
+}
+
+// Combinazioni ricorrenti: coppie di alimenti registrati nello stesso pasto
+// (stesso giorno, stesso tipo pasto) che si ripetono almeno `minOccurrences`
+// volte negli ultimi `days` giorni — es. "pasta + parmigiano" se è successo
+// almeno 2 volte. Alimenti duplicati nello stesso pasto contano una sola
+// volta (un doppione con se stesso non è una "combinazione").
+function getRecurringCombos(dailyLog, days=30, minOccurrences=2, limit=5) {
+  const pairCounts = {};
+  for (const key of lastNDayKeys(days)) {
+    const meals = dailyLog[key]?.meals || [];
+    const byMealType = {};
+    meals.forEach(m => { (byMealType[m.meal] = byMealType[m.meal]||[]).push(m.name); });
+    Object.values(byMealType).forEach(names => {
+      const unique = [...new Set(names)];
+      for (let i=0; i<unique.length; i++) {
+        for (let j=i+1; j<unique.length; j++) {
+          const pairKey = [unique[i], unique[j]].sort().join("|||");
+          pairCounts[pairKey] = (pairCounts[pairKey]||0)+1;
+        }
+      }
+    });
+  }
+  return Object.entries(pairCounts)
+    .filter(([,c]) => c>=minOccurrences)
     .sort((a,b) => b[1]-a[1])
     .slice(0,limit)
-    .map(([name,count]) => ({ name, count }));
+    .map(([pairKey,count]) => ({ items: pairKey.split("|||"), count }));
 }
 
 // Pattern di idratazione: l'acqua non vive nel dailyLog ma in chiavi separate
@@ -233,6 +305,7 @@ function getHydrationPattern(days=7) {
 
 // Punto di ingresso unico della memoria comportamentale.
 function getUserMemory(dailyLog) {
+  const foodMemory = getFoodMemory(dailyLog);
   return {
     mealRoutines: {
       Colazione: getMealRoutine(dailyLog, "Colazione"),
@@ -240,8 +313,10 @@ function getUserMemory(dailyLog) {
       Cena:      getMealRoutine(dailyLog, "Cena"),
       Spuntino:  getMealRoutine(dailyLog, "Spuntino"),
     },
-    topFoods: getTopFoods(dailyLog),
-    foodCounts: getWeeklyFoodCounts(dailyLog),
+    foodMemory,
+    topFoods: getTopFoods(foodMemory),
+    foodCounts: getWeeklyFoodCounts(foodMemory),
+    combos: getRecurringCombos(dailyLog),
     hydration: getHydrationPattern(),
   };
 }
