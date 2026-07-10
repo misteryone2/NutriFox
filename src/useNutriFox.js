@@ -3,7 +3,7 @@ import { getFoxStage } from "./Fox";
 import { FOOD_DB, ALL_FOODS } from "./FoodDB";
  
 // ─────────────────────────────────────────────────────────────────────────────
-// useNutriFox.js — v1.9.3
+// useNutriFox.js — v1.9.5
 //
 // Release di consolidamento tecnico: tutta la logica di business che prima
 // viveva dentro App.jsx (gestione pasti, idratazione, statistiche, dialoghi,
@@ -52,6 +52,21 @@ import { FOOD_DB, ALL_FOODS } from "./FoodDB";
 // stesso pasto. topFoods/foodCounts restano esposti per compatibilità con le
 // superfici esistenti, ma derivano ora da getFoodMemory — mai più da una
 // scansione propria.
+//
+// (v1.9.4 non tocca questo file: ha arricchito solo FoodDB.js con nuovi
+// metadati per alimento, non ancora consultati da questa logica.)
+//
+// v1.9.5: il motore messaggi (v1.7) guadagna un sistema di varietà. Il
+// cooldown da solo è un interruttore on/off; non impediva a un messaggio di
+// tornare a ripetersi appena il cooldown scadeva, se restava l'unico
+// candidato idoneo. Ora nf_msgHistory tiene, per ogni id, { last, count }
+// invece di un semplice timestamp: count alimenta sia una penalità morbida
+// sul peso (pickTopPriority riceve pesi già scontati in base a quante volte
+// il messaggio è stato mostrato di recente) sia un'esclusione temporanea
+// oltre soglia (VARIETY_SUPPRESS_AFTER) — ma solo se esiste un'alternativa
+// idonea, mai un silenzio. Il conteggio decade da solo dopo
+// VARIETY_DECAY_HOURS di pausa. Storico salvato prima di questa versione
+// (timestamp puro) resta compatibile tramite normalizeHistoryEntry.
 // ─────────────────────────────────────────────────────────────────────────────
  
 // ─── STORAGE ──────────────────────────────────────────────────────────────────
@@ -118,7 +133,7 @@ export function sumMacros(items) {
   };
 }
  
-// ─── MOTORE DECISIONALE UNIFICATO (v1.7) ───────────────────────────────────────
+// ─── MOTORE DECISIONALE UNIFICATO (v1.7 · sistema di varietà in v1.9.5) ────────
 // Prima ogni superficie (didascalia in home, popup dopo il pasto, headline del
 // coach) aveva la propria logica di scelta del messaggio: un if/else in
 // ordine di priorità per la didascalia, un pescaggio pesato per il popup, un
@@ -137,7 +152,54 @@ export function sumMacros(items) {
 // meno urgente di un avviso importante si ripeta troppo spesso — le regole
 // generali sono le stesse per tutte le superfici, cambia solo la libreria di
 // contenuti che ciascuna consulta.
- 
+//
+// v1.9.5: il cooldown da solo è un interruttore on/off (o è passato abbastanza
+// tempo o no) e non impedisce a un messaggio di tornare a ripetersi appena il
+// cooldown scade, se resta l'unico candidato idoneo in quel momento. Manca
+// una vera memoria di "questa frase è stata mostrata troppe volte". Il
+// sistema di varietà aggiunge due meccanismi, entrambi basati sullo stesso
+// storico già persistito (nf_msgHistory), esteso da un timestamp a
+// { last, count }:
+//   1. Penalità morbida sul peso: più un messaggio è stato mostrato di
+//      recente, meno probabile è che vinca un pareggio di priorità con un
+//      altro candidato altrettanto idoneo (pickTopPriority resta invariato,
+//      riceve solo pesi già scontati).
+//   2. Esclusione temporanea (fatica): oltre una soglia di ripetizioni
+//      ravvicinate, il messaggio viene escluso del tutto da questo turno di
+//      selezione — MA solo se esiste almeno un'alternativa idonea; se fosse
+//      l'unico candidato possibile, torna comunque eleggibile (mai un
+//      "silenzio" pur di rispettare la varietà).
+// Il contatore si azzera da solo se il messaggio non viene rivisto per
+// VARIETY_DECAY_HOURS: la fatica è sempre relativa al periodo recente, non
+// un giudizio permanente sul messaggio.
+
+const VARIETY_DECAY_HOURS   = 12;   // oltre questa pausa, il conteggio riparte da zero
+const VARIETY_SUPPRESS_AFTER = 3;   // mostrato 3+ volte di recente → escluso se c'è un'alternativa
+const VARIETY_PENALTY        = 0.35; // quanto pesa ogni mostra recente sul peso (soft)
+
+// Storico prima della v1.9.5: nf_msgHistory salvava solo un timestamp numerico
+// per id. Normalizza il formato vecchio in { last, count:1 } così un utente
+// che aggiorna l'app non perde né rompe lo storico già accumulato.
+function normalizeHistoryEntry(raw) {
+  if (raw == null) return null;
+  if (typeof raw === "number") return { last: raw, count: 1 };
+  return raw;
+}
+
+function varietyFactor(id, messageHistory, now) {
+  const entry = normalizeHistoryEntry(messageHistory[id]);
+  if (!entry) return 1;
+  if (now-entry.last >= VARIETY_DECAY_HOURS*3600000) return 1; // troppo tempo fa, nessuna penalità
+  return 1/(1+VARIETY_PENALTY*(entry.count||1));
+}
+
+function isFatigued(id, messageHistory, now) {
+  const entry = normalizeHistoryEntry(messageHistory[id]);
+  if (!entry) return false;
+  if (now-entry.last >= VARIETY_DECAY_HOURS*3600000) return false;
+  return (entry.count||0) >= VARIETY_SUPPRESS_AFTER;
+}
+
 function pickTopPriority(eligible) {
   if (eligible.length === 0) return null;
   const topPriority = Math.min(...eligible.map(c=>c.priority));
@@ -153,17 +215,26 @@ function pickTopPriority(eligible) {
 }
  
 function selectMessage(library, ctx, messageHistory, now=Date.now()) {
-  const eligible = library
-    .filter(c => {
-      if (!c.condition(ctx)) return false;
-      if (c.cooldownMin>0) {
-        const last = messageHistory[c.id];
-        if (last && now-last < c.cooldownMin*60000) return false;
-      }
-      return true;
-    })
-    .map(c => ({ id:c.id, priority:c.priority, weight:c.weight, emotion:c.emotion||null, text: typeof c.text==="function" ? c.text(ctx) : c.text }));
-  return pickTopPriority(eligible);
+  const eligible = library.filter(c => {
+    if (!c.condition(ctx)) return false;
+    if (c.cooldownMin>0) {
+      const entry = normalizeHistoryEntry(messageHistory[c.id]);
+      if (entry && now-entry.last < c.cooldownMin*60000) return false;
+    }
+    return true;
+  });
+  // "Freschi": idonei e non affaticati da troppe ripetizioni ravvicinate. Se
+  // rimane qualcosa, si sceglie solo da lì; altrimenti si ripiega sull'intero
+  // insieme idoneo — la varietà non deve mai produrre un silenzio.
+  const fresh = eligible.filter(c => !isFatigued(c.id, messageHistory, now));
+  const pool = fresh.length ? fresh : eligible;
+  const candidates = pool.map(c => ({
+    id:c.id, priority:c.priority,
+    weight:(c.weight||1) * varietyFactor(c.id, messageHistory, now),
+    emotion:c.emotion||null,
+    text: typeof c.text==="function" ? c.text(ctx) : c.text,
+  }));
+  return pickTopPriority(candidates);
 }
  
 // ─── LIBRERIE DI CONTENUTO ──────────────────────────────────────────────────────
@@ -844,8 +915,20 @@ export function useNutriFox() {
   const [celebratedToday, setCelebratedToday] = useState(()=>load("nf_celebrated_"+todayKey(),{}));
   // Cooldown del motore decisionale unificato (v1.7): quando è stato mostrato
   // per l'ultima volta ogni id di messaggio, condiviso tra le tre superfici.
+  // v1.9.5: ogni voce ora è { last, count } — count è quante volte il
+  // messaggio è stato mostrato senza una pausa di VARIETY_DECAY_HOURS,
+  // alimenta il sistema di varietà (penalità + esclusione temporanea).
   const [messageHistory, setMessageHistory] = useState(()=>load("nf_msgHistory",{}));
-  function recordMessageShown(id){ if(!id) return; setMessageHistory(prev=>({...prev,[id]:Date.now()})); }
+  function recordMessageShown(id){
+    if(!id) return;
+    setMessageHistory(prev=>{
+      const now = Date.now();
+      const prevEntry = normalizeHistoryEntry(prev[id]);
+      const stillRecent = prevEntry && (now-prevEntry.last) < VARIETY_DECAY_HOURS*3600000;
+      const count = stillRecent ? (prevEntry.count||0)+1 : 1;
+      return {...prev, [id]:{ last:now, count }};
+    });
+  }
  
   // Persist
   useEffect(()=>save("nf_setupDone",setupDone),[setupDone]);
