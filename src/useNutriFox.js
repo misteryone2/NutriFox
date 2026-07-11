@@ -4,7 +4,7 @@ import { FOOD_DB, ALL_FOODS } from "./FoodDB";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
-// useNutriFox.js — v1.9.6
+// useNutriFox.js — v1.9.7
 //
 // Release di consolidamento tecnico: tutta la logica di business che prima
 // viveva dentro App.jsx (gestione pasti, idratazione, statistiche, dialoghi,
@@ -86,6 +86,20 @@ import { FOOD_DB, ALL_FOODS } from "./FoodDB";
 // duplicata) e un secondo confronto sull'elenco di tutte le dichiarazioni
 // top-level prima/dopo (identico) — questa non è una riscrittura, è uno
 // spostamento puro.
+//
+// v1.9.7: gli insight erano tutti "istantanei" — fatti su oggi o su un trend
+// a breve termine. Tre nuove funzioni pure distinguono ora tre timeframe:
+// analyzeWeeklyNutrientHabit/analyzeWeeklyMealPattern riconoscono un problema
+// che si ripete nella maggioranza dei giorni della settimana (non più un
+// caso isolato di oggi), analyzeWeekOverWeek confronta la settimana corrente
+// con quella precedente e sceglie la variazione più significativa — qui la
+// volpe inizia davvero a parlare di progressi, non solo di stato attuale.
+// Ogni voce di INSIGHT_MESSAGES è ora etichettata con un timeframe esplicito
+// ("today"/"week_habit"/"week_progress", INSIGHT_TIMEFRAMES) restituito in
+// headlineTimeframe — la priorità resta il criterio di scelta (un problema
+// urgente di oggi batte sempre un'osservazione settimanale). Entrambi i
+// confronti richiedono almeno 3 giorni loggati per lato: con pochi dati non
+// si dice nulla, piuttosto che azzardare un confronto disonesto.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -429,6 +443,92 @@ function analyzeTrend(dailyLog, days=7) {
   const direction = Math.abs(diff) < firstAvg*0.08 ? "stable" : diff>0 ? "up" : "down";
   return { direction, daysLogged: logged.length, avg: Math.round(logged.reduce((a,b)=>a+b,0)/logged.length) };
 }
+
+// v1.9.7: fino ad ora gli insight erano tutti "istantanei" — fatti su oggi
+// (missingNutrient/mealBalance/distribution) o su un trend a breve termine
+// (analyzeTrend, comunque interno agli ultimi 7 giorni). Mancava una vera
+// distinzione tra "problema di oggi" (isolato, può essere un caso) e
+// "abitudine della settimana" (lo stesso problema che si ripete più giorni —
+// non più un caso). analyzeWeeklyNutrientHabit riusa la stessa
+// analyzeMealBalance già scritta per oggi, applicata a ciascun giorno della
+// settimana: nessuna logica di sbilancio duplicata, cambia solo su quanti
+// giorni viene valutata.
+
+// Sbilancio di macro che si ripete nella maggioranza dei giorni loggati della
+// settimana (esclude oggi, ancora in corso) — non un fatto isolato ma un
+// pattern. Richiede almeno 3 giorni loggati per parlare di "abitudine".
+function analyzeWeeklyNutrientHabit(dailyLog, days=7) {
+  const loggedDaysMeals = lastNDayKeys(days,1)
+    .map(k => dailyLog[k]?.meals || [])
+    .filter(meals => meals.length>0);
+  if (loggedDaysMeals.length < 3) return null;
+  const balances = loggedDaysMeals.map(analyzeMealBalance).filter(Boolean);
+  if (!balances.length) return null;
+  const counts = {};
+  balances.forEach(b => { counts[b.type] = (counts[b.type]||0)+1; });
+  const [type, days_] = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0];
+  if (days_ < Math.ceil(loggedDaysMeals.length*0.6)) return null; // non abbastanza ricorrente da essere un'abitudine
+  return { type, days: days_, totalDays: loggedDaysMeals.length };
+}
+
+// Quale pasto tende a dominare le calorie della giornata, in media, sui
+// giorni della settimana — stessa domanda di analyzeDistribution ma sull'arco
+// della settimana invece che sul solo oggi.
+function analyzeWeeklyMealPattern(dailyLog, days=7) {
+  const totalsByMeal = {};
+  let daysWithData = 0;
+  lastNDayKeys(days,1).forEach(k => {
+    const meals = dailyLog[k]?.meals || [];
+    if (!meals.length) return;
+    const byMeal = {};
+    meals.forEach(m => { byMeal[m.meal] = (byMeal[m.meal]||0)+(m.kcal||0); });
+    const dayTotal = Object.values(byMeal).reduce((a,b)=>a+b,0);
+    if (!dayTotal) return;
+    daysWithData++;
+    Object.entries(byMeal).forEach(([meal,kcal]) => {
+      totalsByMeal[meal] = (totalsByMeal[meal]||0) + kcal/dayTotal; // media delle quote giornaliere
+    });
+  });
+  if (daysWithData < 3) return null;
+  const avgShares = Object.entries(totalsByMeal).map(([meal,sum])=>({ meal, avgPct:Math.round((sum/daysWithData)*100) }));
+  if (!avgShares.length) return null;
+  const top = avgShares.reduce((a,b)=>b.avgPct>a.avgPct?b:a);
+  return top.avgPct>=55 ? top : null;
+}
+
+// Confronto tra la settimana corrente e quella precedente — la vera novità
+// richiesta: la volpe può iniziare a parlare di progressi, non solo dello
+// stato attuale. Richiede almeno 3 giorni loggati in ENTRAMBE le settimane,
+// altrimenti il confronto non sarebbe onesto e si preferisce non dire nulla.
+// Deterministico: a parità di dati, sceglie sempre la stessa metrica (quella
+// con la variazione più marcata), mai a caso.
+function analyzeWeekOverWeek(dailyLog, gKcal) {
+  const summarize = keys => {
+    const daysMeals = keys.map(k=>dailyLog[k]?.meals||[]).filter(m=>m.length>0);
+    if (daysMeals.length < 3) return null;
+    const totals = daysMeals.map(sumMacros);
+    const avgKcal = totals.reduce((a,b)=>a+b.kcal,0)/daysMeals.length;
+    const avgP    = totals.reduce((a,b)=>a+b.p,0)/daysMeals.length;
+    const onTargetDays = totals.filter(t=>t.kcal>0 && t.kcal<=gKcal*1.15 && t.kcal>=gKcal*0.85).length;
+    return { daysLogged: daysMeals.length, avgKcal, avgP, onTargetDays };
+  };
+  const thisWeek = summarize(lastNDayKeys(7,1));   // esclude oggi, ancora in corso
+  const lastWeek = summarize(lastNDayKeys(7,8));   // i 7 giorni precedenti a quelli
+  if (!thisWeek || !lastWeek) return null;
+
+  const proteinDeltaPct = lastWeek.avgP>0 ? Math.round(((thisWeek.avgP-lastWeek.avgP)/lastWeek.avgP)*100) : 0;
+  const onTargetDelta = thisWeek.onTargetDays - lastWeek.onTargetDays;
+  const loggedDelta = thisWeek.daysLogged - lastWeek.daysLogged;
+
+  const candidates = [
+    { metric:"protein",  delta:proteinDeltaPct, magnitude:Math.abs(proteinDeltaPct) },
+    { metric:"onTarget", delta:onTargetDelta,   magnitude:Math.abs(onTargetDelta)*15 },  // scalato per confrontabilità con %
+    { metric:"logged",   delta:loggedDelta,     magnitude:Math.abs(loggedDelta)*15 },
+  ].filter(c => c.magnitude>=10); // soglia minima: sotto, non vale la pena dirlo
+  if (!candidates.length) return null;
+  const best = candidates.reduce((a,b)=>b.magnitude>a.magnitude?b:a);
+  return { metric:best.metric, delta:best.delta, thisWeek, lastWeek };
+}
  
 // 2-3 piccoli obiettivi per la giornata, sempre calcolati dallo stato reale
 // (mai statici): l'utente vede subito cosa è già raggiunto.
@@ -467,7 +567,24 @@ function getWeeklyGoals(dailyLog, gKcal, hydration) {
 // Superficie "insight": la headline della card Coach in home. Stessa priorità
 // di prima (nutriente mancante > equilibrio pasti > distribuzione > trend >
 // presenza leggera), ora espressa come libreria valutata da selectMessage.
+// v1.9.7: ogni voce ora appartiene esplicitamente a un timeframe —
+// "today" (fatto isolato di oggi), "week_habit" (si ripete nella settimana,
+// non più un caso), "week_progress" (confronto con la settimana scorsa: qui
+// la volpe inizia a parlare di progressi, non solo di stato attuale). La
+// priorità resta il criterio di scelta principale (un problema urgente di
+// oggi batte sempre un'osservazione settimanale), il timeframe è un'etichetta
+// in più sul risultato finale, utile a chi consulta i dati (UI futura, AI).
+const INSIGHT_TIMEFRAMES = {
+  ins_missing_nutrient:"today", ins_fat_heavy:"today", ins_low_protein_balance:"today",
+  ins_distribution:"today", ins_all_good:"today",
+  ins_trend_up:"week_habit", ins_trend_down:"week_habit",
+  ins_weekly_habit_fat:"week_habit", ins_weekly_habit_protein:"week_habit", ins_weekly_meal_pattern:"week_habit",
+  ins_progress_protein_up:"week_progress", ins_progress_protein_down:"week_progress",
+  ins_progress_ontarget_up:"week_progress", ins_progress_logged_up:"week_progress",
+};
+
 const INSIGHT_MESSAGES = [
+  // ── today: problema isolato di oggi ────────────────────────────────────
   { id:"ins_missing_nutrient", priority:2, cooldownMin:0,
     condition: ctx => !!ctx.missingNutrient,
     text: ctx => `Ti mancano circa ${ctx.missingNutrient.missingGrams}g di ${ctx.missingNutrient.nutrient} rispetto al tuo obiettivo di oggi.` },
@@ -480,12 +597,36 @@ const INSIGHT_MESSAGES = [
   { id:"ins_distribution", priority:2, cooldownMin:0,
     condition: ctx => !!ctx.distribution,
     text: ctx => `${ctx.distribution.meal} ha coperto il ${ctx.distribution.pct}% delle calorie di oggi: prova a distribuirle meglio nei prossimi giorni.` },
+  // ── week_habit: si ripete nella settimana, non più un caso isolato ─────
   { id:"ins_trend_up", priority:4, cooldownMin:0,
     condition: ctx => ctx.trend?.direction==="up",
     text: ctx => `Le tue calorie medie sono in aumento negli ultimi giorni (~${ctx.trend.avg} kcal/giorno).` },
   { id:"ins_trend_down", priority:4, cooldownMin:0,
     condition: ctx => ctx.trend?.direction==="down",
     text: ctx => `Le tue calorie medie sono in calo negli ultimi giorni (~${ctx.trend.avg} kcal/giorno).` },
+  { id:"ins_weekly_habit_fat", priority:3, cooldownMin:720,
+    condition: ctx => ctx.weeklyHabit?.type==="fat_heavy",
+    text: ctx => `Non è solo oggi: i pasti sono stati ricchi di grassi per ${ctx.weeklyHabit.days} giorni su ${ctx.weeklyHabit.totalDays} questa settimana.` },
+  { id:"ins_weekly_habit_protein", priority:3, cooldownMin:720,
+    condition: ctx => ctx.weeklyHabit?.type==="low_protein",
+    text: ctx => `Le proteine sono state basse ${ctx.weeklyHabit.days} giorni su ${ctx.weeklyHabit.totalDays} questa settimana — è diventata un'abitudine.` },
+  { id:"ins_weekly_meal_pattern", priority:4, cooldownMin:720,
+    condition: ctx => !!ctx.weeklyMealPattern,
+    text: ctx => `${ctx.weeklyMealPattern.meal} copre in media il ${ctx.weeklyMealPattern.avgPct}% delle calorie della giornata questa settimana.` },
+  // ── week_progress: confronto con la settimana scorsa ───────────────────
+  { id:"ins_progress_protein_up", priority:3, cooldownMin:720,
+    condition: ctx => ctx.weekOverWeek?.metric==="protein" && ctx.weekOverWeek.delta>0,
+    text: ctx => `Questa settimana le tue proteine medie sono più alte della scorsa (+${ctx.weekOverWeek.delta}%) — bel progresso! 💪` },
+  { id:"ins_progress_protein_down", priority:4, cooldownMin:720,
+    condition: ctx => ctx.weekOverWeek?.metric==="protein" && ctx.weekOverWeek.delta<0,
+    text: ctx => `Questa settimana le proteine medie sono un po' più basse della scorsa (${ctx.weekOverWeek.delta}%).` },
+  { id:"ins_progress_ontarget_up", priority:3, cooldownMin:720,
+    condition: ctx => ctx.weekOverWeek?.metric==="onTarget" && ctx.weekOverWeek.delta>0,
+    text: ctx => `Questa settimana hai centrato il target calorico ${ctx.weekOverWeek.delta} giorni in più della scorsa!` },
+  { id:"ins_progress_logged_up", priority:3, cooldownMin:720,
+    condition: ctx => ctx.weekOverWeek?.metric==="logged" && ctx.weekOverWeek.delta>0,
+    text: ctx => `Hai registrato ${ctx.weekOverWeek.delta} giorni in più questa settimana rispetto alla scorsa — sempre più costante!` },
+  // ── today: presenza leggera di riserva ──────────────────────────────────
   { id:"ins_all_good", priority:5, cooldownMin:0,
     condition: () => true,
     text: () => "Stai mantenendo un buon equilibrio nutrizionale, continua così!" },
@@ -496,12 +637,16 @@ function getNutritionInsights({ dailyLog, todayMeals, totalP, totalC, totalF, gK
   const mealBalance = analyzeMealBalance(todayMeals);
   const distribution = analyzeDistribution(todayMeals);
   const trend = analyzeTrend(dailyLog);
+  const weeklyHabit = analyzeWeeklyNutrientHabit(dailyLog);
+  const weeklyMealPattern = analyzeWeeklyMealPattern(dailyLog);
+  const weekOverWeek = analyzeWeekOverWeek(dailyLog, gKcal);
   const dailyGoals = getDailyGoals({ targetWater, water, missingNutrient, mealsCount: todayMeals.length });
   const weeklyGoals = getWeeklyGoals(dailyLog, gKcal, hydration);
  
-  const picked = selectMessage(INSIGHT_MESSAGES, { missingNutrient, mealBalance, distribution, trend }, messageHistory);
+  const picked = selectMessage(INSIGHT_MESSAGES, { missingNutrient, mealBalance, distribution, trend, weeklyHabit, weeklyMealPattern, weekOverWeek }, messageHistory);
+  const headlineTimeframe = INSIGHT_TIMEFRAMES[picked.id] || "today";
  
-  return { targets, missingNutrient, mealBalance, distribution, trend, dailyGoals, weeklyGoals, headline: picked.text, headlineId: picked.id };
+  return { targets, missingNutrient, mealBalance, distribution, trend, weeklyHabit, weeklyMealPattern, weekOverWeek, dailyGoals, weeklyGoals, headline: picked.text, headlineId: picked.id, headlineTimeframe };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
