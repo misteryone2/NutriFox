@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// FoodDB.js — v1.9.5
+// FoodDB.js — v1.9.6
 //
 // Database alimenti e derivazione ALL_FOODS, estratti da useNutriFox.js dove
 // erano già isolati e pronti per questo passaggio fin dalla v1.4.1. Nessun
@@ -42,6 +42,10 @@
 //
 // v1.9.5: +2 alimenti (258 totali) — camomilla e succo di mirtillo, con lo
 // schema di metadati completo introdotto in v1.9.4.
+//
+// v1.9.6: +1 alimento (259 totali) — tisana ai frutti di bosco. Questa
+// versione ha riorganizzato solo useNutriFox.js (pulizia strutturale in 6
+// sezioni); FoodDB.js non ha altri cambiamenti oltre al nuovo alimento.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const FOOD_DB = {
@@ -322,6 +326,7 @@ export const FOOD_DB = {
     { name:"Tè verde (250ml)", kcal:2, p:0, c:0.5, f:0, type:"light", fibra:0, zuccheri:0, sale:0, gruppo:"Bevande", vegetariano:true, vegano:true, sazieta:"basso", pasti:["Colazione","Pranzo","Cena","Spuntino"] },
     { name:"Camomilla (250ml)", kcal:1, p:0, c:0.2, f:0, type:"light", fibra:0, zuccheri:0, sale:0, gruppo:"Bevande", vegetariano:true, vegano:true, sazieta:"basso", pasti:["Colazione","Pranzo","Cena","Spuntino"] },
     { name:"Succo di mirtillo (200ml)", kcal:110, p:0.5, c:26, f:0, type:"carb", fibra:0.5, zuccheri:23.4, sale:0, gruppo:"Bevande", vegetariano:true, vegano:true, sazieta:"basso", pasti:["Colazione","Pranzo","Cena","Spuntino"] },
+    { name:"Tisana ai frutti di bosco (250ml)", kcal:1, p:0, c:0.2, f:0, type:"light", fibra:0, zuccheri:0, sale:0, gruppo:"Bevande", vegetariano:true, vegano:true, sazieta:"basso", pasti:["Colazione","Pranzo","Cena","Spuntino"] },
   ],
 };
 
