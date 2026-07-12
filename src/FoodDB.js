@@ -331,7 +331,7 @@ export const FOOD_DB = {
     { name:"Camomilla (250ml)", kcal:1, p:0, c:0.2, f:0, type:"light", fibra:0, zuccheri:0, sale:0, gruppo:"Bevande", vegetariano:true, vegano:true, sazieta:"basso", pasti:["Colazione","Pranzo","Cena","Spuntino"] },
     { name:"Succo di mirtillo (200ml)", kcal:110, p:0.5, c:26, f:0, type:"carb", fibra:0.5, zuccheri:23.4, sale:0, gruppo:"Bevande", vegetariano:true, vegano:true, sazieta:"basso", pasti:["Colazione","Pranzo","Cena","Spuntino"] },
     { name:"Tisana ai frutti di bosco (250ml)", kcal:1, p:0, c:0.2, f:0, type:"light", fibra:0, zuccheri:0, sale:0, gruppo:"Bevande", vegetariano:true, vegano:true, sazieta:"basso", pasti:["Colazione","Pranzo","Cena","Spuntino"] },
-    { name:"Latte di mandorla (200ml)", kcal:24, p:0.4, c:2.4, f:1.2, type:"light", fibra:0.2, zuccheri:2.2, sale:0.05, gruppo:"Bevande", vegetariano:true, vegano:true, sazieta:"basso", pasti:["Colazione","Pranzo","Cena","Spuntino"] },
+    { name:"Spremuta d'arancia (200ml)", kcal:90, p:1.4, c:20, f:0.2, type:"carb", fibra:0.4, zuccheri:18, sale:0, gruppo:"Bevande", vegetariano:true, vegano:true, sazieta:"basso", pasti:["Colazione","Pranzo","Cena","Spuntino"] },
   ],
 };
 
