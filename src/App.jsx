@@ -563,9 +563,9 @@ export default function NutriFox() {
   // v1.8: se il motore ha richiesto un'emozione speciale, l'etichetta la segue —
   // niente più disallineamento tra volto (proud/curious) e testo sotto il nome.
   const displayMood = specialEmotion || mood;
-  const hungerColor=foxState.hunger>70?C.accent:foxState.hunger>40?C.gold:C.green;
+  const hungerColor=foxState.emotion.hunger>70?C.accent:foxState.emotion.hunger>40?C.gold:C.green;
   const energyColor=foxState.energy>60?C.green:foxState.energy>30?C.gold:C.accent;
-  const happinessColor=(foxState.happiness??70)>60?C.green:(foxState.happiness??70)>30?C.gold:C.accent;
+  const happinessColor=foxState.emotion.happiness>60?C.green:foxState.emotion.happiness>30?C.gold:C.accent;
   const reactionColors={happy:C.green,energetic:C.gold,neutral:C.purple,sad:C.accent,relieved:C.blue};
  
   return(
@@ -599,7 +599,7 @@ export default function NutriFox() {
  
         {/* Fox + reaction popup + feed label */}
         <div style={{position:"relative",display:"inline-block"}}>
-          <Fox mood={mood} streak={streak} size={160} bounce={bounce} lastFedAt={foxState.lastFedAt} licking={licking} specialEmotion={specialEmotion}/>
+          <Fox mood={mood} streak={streak} size={160} bounce={bounce} lastFedAt={foxState.behavior.lastFedAt} licking={licking} specialEmotion={specialEmotion} relationship={foxState.relationship} trust={foxState.trust}/>
           {feedLabel&&(
             <div style={{position:"absolute",top:-10,left:"50%",transform:"translateX(-50%)",background:`linear-gradient(135deg,${C.accent},#E8553F)`,borderRadius:20,padding:"5px 14px",fontSize:13,fontWeight:700,color:"white",whiteSpace:"nowrap",animation:"floatUp 2s ease-out forwards",boxShadow:`0 4px 16px ${C.accent}55`}}>
               {feedLabel}
@@ -628,9 +628,9 @@ export default function NutriFox() {
  
         {/* Fox stats — ora 3 barre: fame, energia, felicità */}
         <div style={{display:"flex",gap:10,marginBottom:14}}>
-          <StatBar label="Fame" value={foxState.hunger} color={hungerColor} icon="🍽️"/>
+          <StatBar label="Fame" value={foxState.emotion.hunger} color={hungerColor} icon="🍽️"/>
           <StatBar label="Energia" value={foxState.energy} color={energyColor} icon="⚡"/>
-          <StatBar label="Felicità" value={foxState.happiness??70} color={happinessColor} icon="💖"/>
+          <StatBar label="Felicità" value={foxState.emotion.happiness} color={happinessColor} icon="💖"/>
         </div>
  
         {/* Streak progress */}
