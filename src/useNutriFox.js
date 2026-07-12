@@ -4,7 +4,7 @@ import { FOOD_DB, ALL_FOODS } from "./FoodDB";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
-// useNutriFox.js — v1.9.7
+// useNutriFox.js — v2.0
 //
 // Release di consolidamento tecnico: tutta la logica di business che prima
 // viveva dentro App.jsx (gestione pasti, idratazione, statistiche, dialoghi,
@@ -100,6 +100,45 @@ import { FOOD_DB, ALL_FOODS } from "./FoodDB";
 // urgente di oggi batte sempre un'osservazione settimanale). Entrambi i
 // confronti richiedono almeno 3 giorni loggati per lato: con pochi dati non
 // si dice nulla, piuttosto che azzardare un confronto disonesto.
+//
+// v2.0 — Evoluzione architetturale. Non nuove funzionalità: separazione
+// definitiva di logica nutrizionale e comportamentale, con 5 responsabilità
+// nette (User Profile, User Memory, Nutrition Engine, Fox Engine, Message
+// Engine), ancora tutte in questo file — l'estrazione fisica in moduli
+// separati resta un passo a parte, per quando sarà il momento.
+//
+//  - Nutrition Engine: getNutritionInsights diventa computeNutritionState —
+//    SOLI fatti, nessuna scelta di testo. Il Meal Builder si sposta qui da
+//    quella che era "Suggestion Engine" (suggerire cibo è dominio
+//    nutrizionale, non dialogo).
+//  - Message Engine (ex "Suggestion Engine"): assorbe anche INSIGHT_MESSAGES/
+//    AMBIENT_MESSAGES/REACTION_MESSAGES e i loro context-builder — prima
+//    erano sparsi tra Nutrition Engine e Fox Engine. Non legge più mai
+//    dailyLog: legge solo nutritionState/userMemory/foxState.
+//  - Fox Engine: diventa il vero centro della parte comportamentale. Un solo
+//    oggetto foxState (emotion, energy, relationship, trust, experience,
+//    curiosity, personality, memory, behavior) — tutto il resto dell'app
+//    legge solo questo. Lo stato biologico grezzo tick-based (prima si
+//    chiamava anch'esso "foxState") è stato rinominato fxVitals: è un INPUT
+//    di computeFoxState, non lo stato completo. experience/trust/curiosity
+//    sono calcoli di crescita/prevedibilità/esplorazione (non contatori
+//    semplici — vedi i commenti sulle singole funzioni). relationship è UNO
+//    degli attributi, non il fulcro: altri potranno affiancarlo in futuro
+//    senza riprogettare il modello. memory include eventi storici (prima
+//    streak settimanale, primo ritorno dopo una pausa), non solo l'ultimo.
+//    personality è statica per ora, predisposta per l'AI futura.
+//  - FoxBrain.js/FoxAnimations.js (v2.0, non più solo useNutriFox.js):
+//    relationship/trust influenzano SOLO elementi secondari — warmthScale/
+//    glowOpacity in FoxBrain (mai lo stage, che resta legato solo alla
+//    streak) e una modulazione ±10% dei micro-eventi in FoxAnimations
+//    (mai i pesi/la personalità di base). FoxSVG.jsx resta invariato.
+//  - Eliminata una duplicazione preesistente: deriveStage viveva sia in
+//    FoxBrain.js sia (copiata) in Fox.jsx; ora è unica, esportata da
+//    FoxBrain ed esposta da Fox.jsx come semplice re-export.
+// Tutto deterministico (zero Math.random() nel nuovo codice), verificato con
+// test isolati su scenari sintetici di 90 giorni (esperienza, streak mai
+// raggiunta, milestone storiche, pause e ritorni) prima di essere collegato
+// all'hook.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -299,6 +338,11 @@ function getUserMemory(dailyLog) {
 // ─── Routine orarie di un tipo di pasto ────────────────────────────────────
 // Routine di un tipo di pasto: media oraria negli ultimi 14 giorni (esclusi
 // oggi), solo se ci sono abbastanza dati per parlare davvero di "abitudine".
+// v2.0: oltre alla media, anche `spreadHours` — quanto sono sparsi gli orari
+// intorno alla media (deviazione media assoluta). Non serve solo a sapere
+// QUANDO l'utente mangia di solito, ma QUANTO è prevedibile: un valore basso
+// alimenta la fiducia del Fox Engine, uno alto la riduce. Nessuna nuova
+// scansione: stessi campioni già raccolti per avgHour.
 function getMealRoutine(dailyLog, mealType) {
   const hours = [];
   for (const key of lastNDayKeys(14, 1)) {
@@ -310,14 +354,22 @@ function getMealRoutine(dailyLog, mealType) {
   }
   if (hours.length < 3) return null;
   const avgHour = Math.round(hours.reduce((a,b)=>a+b,0)/hours.length);
-  return { avgHour, samples: hours.length };
+  const spreadHours = Math.round((hours.reduce((s,h)=>s+Math.abs(h-avgHour),0)/hours.length)*10)/10;
+  return { avgHour, samples: hours.length, spreadHours };
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
 
 // ═════════════════════════════════════════════════════════════════════════════
 // SEZIONE 4 · NUTRITION ENGINE
 // Analisi nutrizionale pura: totali, target, cosa manca, come sono distribuiti
-// i pasti, il trend, i traguardi (giornalieri e settimanali), e la headline
-// del coach. Nessuno stato React, nessuna chiamata esterna.
+// i pasti, il trend, i traguardi (giornalieri e settimanali), lo stato
+// nutrizionale del giorno/settimana, e il Meal Builder (suggerire cibo è
+// dominio nutrizionale, non dialogo — spostato qui dalla v2.0, prima viveva
+// insieme al motore messaggi solo per contiguità storica). Nessuno stato
+// React, nessuna chiamata esterna, nessuna scelta di testo: questo motore
+// restituisce SOLO fatti strutturati (nutritionState) — è il Message Engine,
+// più avanti, a scegliere quale fatto diventa la headline mostrata.
 // ═════════════════════════════════════════════════════════════════════════════
 
 // ─── Totali e streak di costanza ────────────────────────────────────────────
@@ -560,79 +612,13 @@ function getWeeklyGoals(dailyLog, gKcal, hydration) {
   return goals;
 }
 
-// ─── Headline del coach (INSIGHT_MESSAGES) ─────────────────────────────────
-// Punto di ingresso unico del motore: combina tutte le analisi e sceglie il
-// messaggio più utile da mostrare come "headline" del coach. La priorità
-// riflette cosa è più actionable adesso per l'utente.
-// Superficie "insight": la headline della card Coach in home. Stessa priorità
-// di prima (nutriente mancante > equilibrio pasti > distribuzione > trend >
-// presenza leggera), ora espressa come libreria valutata da selectMessage.
-// v1.9.7: ogni voce ora appartiene esplicitamente a un timeframe —
-// "today" (fatto isolato di oggi), "week_habit" (si ripete nella settimana,
-// non più un caso), "week_progress" (confronto con la settimana scorsa: qui
-// la volpe inizia a parlare di progressi, non solo di stato attuale). La
-// priorità resta il criterio di scelta principale (un problema urgente di
-// oggi batte sempre un'osservazione settimanale), il timeframe è un'etichetta
-// in più sul risultato finale, utile a chi consulta i dati (UI futura, AI).
-const INSIGHT_TIMEFRAMES = {
-  ins_missing_nutrient:"today", ins_fat_heavy:"today", ins_low_protein_balance:"today",
-  ins_distribution:"today", ins_all_good:"today",
-  ins_trend_up:"week_habit", ins_trend_down:"week_habit",
-  ins_weekly_habit_fat:"week_habit", ins_weekly_habit_protein:"week_habit", ins_weekly_meal_pattern:"week_habit",
-  ins_progress_protein_up:"week_progress", ins_progress_protein_down:"week_progress",
-  ins_progress_ontarget_up:"week_progress", ins_progress_logged_up:"week_progress",
-};
-
-const INSIGHT_MESSAGES = [
-  // ── today: problema isolato di oggi ────────────────────────────────────
-  { id:"ins_missing_nutrient", priority:2, cooldownMin:0,
-    condition: ctx => !!ctx.missingNutrient,
-    text: ctx => `Ti mancano circa ${ctx.missingNutrient.missingGrams}g di ${ctx.missingNutrient.nutrient} rispetto al tuo obiettivo di oggi.` },
-  { id:"ins_fat_heavy", priority:2, cooldownMin:0,
-    condition: ctx => ctx.mealBalance?.type==="fat_heavy",
-    text: ctx => `Oggi i pasti sono piuttosto ricchi di grassi (${ctx.mealBalance.pct}% delle calorie).` },
-  { id:"ins_low_protein_balance", priority:2, cooldownMin:0,
-    condition: ctx => ctx.mealBalance?.type==="low_protein",
-    text: ctx => `Potresti aggiungere più proteine ai prossimi pasti (solo ${ctx.mealBalance.pct}% delle calorie finora).` },
-  { id:"ins_distribution", priority:2, cooldownMin:0,
-    condition: ctx => !!ctx.distribution,
-    text: ctx => `${ctx.distribution.meal} ha coperto il ${ctx.distribution.pct}% delle calorie di oggi: prova a distribuirle meglio nei prossimi giorni.` },
-  // ── week_habit: si ripete nella settimana, non più un caso isolato ─────
-  { id:"ins_trend_up", priority:4, cooldownMin:0,
-    condition: ctx => ctx.trend?.direction==="up",
-    text: ctx => `Le tue calorie medie sono in aumento negli ultimi giorni (~${ctx.trend.avg} kcal/giorno).` },
-  { id:"ins_trend_down", priority:4, cooldownMin:0,
-    condition: ctx => ctx.trend?.direction==="down",
-    text: ctx => `Le tue calorie medie sono in calo negli ultimi giorni (~${ctx.trend.avg} kcal/giorno).` },
-  { id:"ins_weekly_habit_fat", priority:3, cooldownMin:720,
-    condition: ctx => ctx.weeklyHabit?.type==="fat_heavy",
-    text: ctx => `Non è solo oggi: i pasti sono stati ricchi di grassi per ${ctx.weeklyHabit.days} giorni su ${ctx.weeklyHabit.totalDays} questa settimana.` },
-  { id:"ins_weekly_habit_protein", priority:3, cooldownMin:720,
-    condition: ctx => ctx.weeklyHabit?.type==="low_protein",
-    text: ctx => `Le proteine sono state basse ${ctx.weeklyHabit.days} giorni su ${ctx.weeklyHabit.totalDays} questa settimana — è diventata un'abitudine.` },
-  { id:"ins_weekly_meal_pattern", priority:4, cooldownMin:720,
-    condition: ctx => !!ctx.weeklyMealPattern,
-    text: ctx => `${ctx.weeklyMealPattern.meal} copre in media il ${ctx.weeklyMealPattern.avgPct}% delle calorie della giornata questa settimana.` },
-  // ── week_progress: confronto con la settimana scorsa ───────────────────
-  { id:"ins_progress_protein_up", priority:3, cooldownMin:720,
-    condition: ctx => ctx.weekOverWeek?.metric==="protein" && ctx.weekOverWeek.delta>0,
-    text: ctx => `Questa settimana le tue proteine medie sono più alte della scorsa (+${ctx.weekOverWeek.delta}%) — bel progresso! 💪` },
-  { id:"ins_progress_protein_down", priority:4, cooldownMin:720,
-    condition: ctx => ctx.weekOverWeek?.metric==="protein" && ctx.weekOverWeek.delta<0,
-    text: ctx => `Questa settimana le proteine medie sono un po' più basse della scorsa (${ctx.weekOverWeek.delta}%).` },
-  { id:"ins_progress_ontarget_up", priority:3, cooldownMin:720,
-    condition: ctx => ctx.weekOverWeek?.metric==="onTarget" && ctx.weekOverWeek.delta>0,
-    text: ctx => `Questa settimana hai centrato il target calorico ${ctx.weekOverWeek.delta} giorni in più della scorsa!` },
-  { id:"ins_progress_logged_up", priority:3, cooldownMin:720,
-    condition: ctx => ctx.weekOverWeek?.metric==="logged" && ctx.weekOverWeek.delta>0,
-    text: ctx => `Hai registrato ${ctx.weekOverWeek.delta} giorni in più questa settimana rispetto alla scorsa — sempre più costante!` },
-  // ── today: presenza leggera di riserva ──────────────────────────────────
-  { id:"ins_all_good", priority:5, cooldownMin:0,
-    condition: () => true,
-    text: () => "Stai mantenendo un buon equilibrio nutrizionale, continua così!" },
-];
- 
-function getNutritionInsights({ dailyLog, todayMeals, totalP, totalC, totalF, gKcal, totalKcal, targets, water, targetWater, hydration }, messageHistory) {
+// ─── Stato nutrizionale (fatti, nessuna scelta di testo) ───────────────────
+// v2.0: prima questa funzione (getNutritionInsights) calcolava i fatti E
+// sceglieva il testo della headline nello stesso posto — mescolando Nutrition
+// Engine e Message Engine. Ora restituisce SOLO fatti strutturati
+// (nutritionState): è il Message Engine, più avanti nel file, a scegliere
+// quale fatto diventa la headline, leggendo esclusivamente questo oggetto.
+function computeNutritionState({ dailyLog, todayMeals, totalP, totalC, totalF, gKcal, totalKcal, targets, water, targetWater, weeklyGoals }) {
   const missingNutrient = analyzeMissingNutrient({ totalP, totalC, totalF, targets });
   const mealBalance = analyzeMealBalance(todayMeals);
   const distribution = analyzeDistribution(todayMeals);
@@ -641,126 +627,11 @@ function getNutritionInsights({ dailyLog, todayMeals, totalP, totalC, totalF, gK
   const weeklyMealPattern = analyzeWeeklyMealPattern(dailyLog);
   const weekOverWeek = analyzeWeekOverWeek(dailyLog, gKcal);
   const dailyGoals = getDailyGoals({ targetWater, water, missingNutrient, mealsCount: todayMeals.length });
-  const weeklyGoals = getWeeklyGoals(dailyLog, gKcal, hydration);
- 
-  const picked = selectMessage(INSIGHT_MESSAGES, { missingNutrient, mealBalance, distribution, trend, weeklyHabit, weeklyMealPattern, weekOverWeek }, messageHistory);
-  const headlineTimeframe = INSIGHT_TIMEFRAMES[picked.id] || "today";
- 
-  return { targets, missingNutrient, mealBalance, distribution, trend, weeklyHabit, weeklyMealPattern, weekOverWeek, dailyGoals, weeklyGoals, headline: picked.text, headlineId: picked.id, headlineTimeframe };
+
+  return { targets, missingNutrient, mealBalance, distribution, trend, weeklyHabit, weeklyMealPattern, weekOverWeek, dailyGoals, weeklyGoals };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// SEZIONE 5 · SUGGESTION ENGINE
-// I due motori deterministici che "scelgono qualcosa tra più candidati": quale
-// messaggio mostrare (varietà + priorità) e quale pasto suggerire (Meal
-// Builder). Stesso principio in entrambi: pesare, penalizzare, mai bloccare
-// del tutto se non c'è un'alternativa.
-// ═════════════════════════════════════════════════════════════════════════════
-
-// ─── Motore di selezione messaggi (priorità + varietà) ─────────────────────
-// ─── MOTORE DECISIONALE UNIFICATO (v1.7 · sistema di varietà in v1.9.5) ────────
-// Prima ogni superficie (didascalia in home, popup dopo il pasto, headline del
-// coach) aveva la propria logica di scelta del messaggio: un if/else in
-// ordine di priorità per la didascalia, un pescaggio pesato per il popup, un
-// altro if/else per la headline. Le regole erano equivalenti nello spirito
-// ("mostra prima ciò che conta di più") ma implementate tre volte in modo
-// diverso. Ora un'unica coppia di funzioni primitive gestisce la selezione
-// per tutte e tre le superfici:
-//
-//  - pickTopPriority(candidati): dato un elenco già filtrato per eleggibilità,
-//    sceglie il candidato di priorità più alta (numero più basso = più
-//    importante); a parità di priorità sceglie a caso pesato tra i pari.
-//  - selectMessage(libreria, ctx, storico): valuta condition() e cooldown per
-//    ogni voce della libreria, poi delega a pickTopPriority.
-//
-// Il cooldown (persistito in nf_msgHistory) evita che un "fatto" via via
-// meno urgente di un avviso importante si ripeta troppo spesso — le regole
-// generali sono le stesse per tutte le superfici, cambia solo la libreria di
-// contenuti che ciascuna consulta.
-//
-// v1.9.5: il cooldown da solo è un interruttore on/off (o è passato abbastanza
-// tempo o no) e non impedisce a un messaggio di tornare a ripetersi appena il
-// cooldown scade, se resta l'unico candidato idoneo in quel momento. Manca
-// una vera memoria di "questa frase è stata mostrata troppe volte". Il
-// sistema di varietà aggiunge due meccanismi, entrambi basati sullo stesso
-// storico già persistito (nf_msgHistory), esteso da un timestamp a
-// { last, count }:
-//   1. Penalità morbida sul peso: più un messaggio è stato mostrato di
-//      recente, meno probabile è che vinca un pareggio di priorità con un
-//      altro candidato altrettanto idoneo (pickTopPriority resta invariato,
-//      riceve solo pesi già scontati).
-//   2. Esclusione temporanea (fatica): oltre una soglia di ripetizioni
-//      ravvicinate, il messaggio viene escluso del tutto da questo turno di
-//      selezione — MA solo se esiste almeno un'alternativa idonea; se fosse
-//      l'unico candidato possibile, torna comunque eleggibile (mai un
-//      "silenzio" pur di rispettare la varietà).
-// Il contatore si azzera da solo se il messaggio non viene rivisto per
-// VARIETY_DECAY_HOURS: la fatica è sempre relativa al periodo recente, non
-// un giudizio permanente sul messaggio.
-
-const VARIETY_DECAY_HOURS   = 12;   // oltre questa pausa, il conteggio riparte da zero
-const VARIETY_SUPPRESS_AFTER = 3;   // mostrato 3+ volte di recente → escluso se c'è un'alternativa
-const VARIETY_PENALTY        = 0.35; // quanto pesa ogni mostra recente sul peso (soft)
-
-// Storico prima della v1.9.5: nf_msgHistory salvava solo un timestamp numerico
-// per id. Normalizza il formato vecchio in { last, count:1 } così un utente
-// che aggiorna l'app non perde né rompe lo storico già accumulato.
-function normalizeHistoryEntry(raw) {
-  if (raw == null) return null;
-  if (typeof raw === "number") return { last: raw, count: 1 };
-  return raw;
-}
-
-function varietyFactor(id, messageHistory, now) {
-  const entry = normalizeHistoryEntry(messageHistory[id]);
-  if (!entry) return 1;
-  if (now-entry.last >= VARIETY_DECAY_HOURS*3600000) return 1; // troppo tempo fa, nessuna penalità
-  return 1/(1+VARIETY_PENALTY*(entry.count||1));
-}
-
-function isFatigued(id, messageHistory, now) {
-  const entry = normalizeHistoryEntry(messageHistory[id]);
-  if (!entry) return false;
-  if (now-entry.last >= VARIETY_DECAY_HOURS*3600000) return false;
-  return (entry.count||0) >= VARIETY_SUPPRESS_AFTER;
-}
-
-function pickTopPriority(eligible) {
-  if (eligible.length === 0) return null;
-  const topPriority = Math.min(...eligible.map(c=>c.priority));
-  const topTier = eligible.filter(c=>c.priority===topPriority);
-  const totalWeight = topTier.reduce((s,c)=>s+(c.weight||1),0);
-  let r = Math.random()*totalWeight;
-  for (const c of topTier) {
-    const w = c.weight||1;
-    if (r < w) return c;
-    r -= w;
-  }
-  return topTier[topTier.length-1];
-}
- 
-function selectMessage(library, ctx, messageHistory, now=Date.now()) {
-  const eligible = library.filter(c => {
-    if (!c.condition(ctx)) return false;
-    if (c.cooldownMin>0) {
-      const entry = normalizeHistoryEntry(messageHistory[c.id]);
-      if (entry && now-entry.last < c.cooldownMin*60000) return false;
-    }
-    return true;
-  });
-  // "Freschi": idonei e non affaticati da troppe ripetizioni ravvicinate. Se
-  // rimane qualcosa, si sceglie solo da lì; altrimenti si ripiega sull'intero
-  // insieme idoneo — la varietà non deve mai produrre un silenzio.
-  const fresh = eligible.filter(c => !isFatigued(c.id, messageHistory, now));
-  const pool = fresh.length ? fresh : eligible;
-  const candidates = pool.map(c => ({
-    id:c.id, priority:c.priority,
-    weight:(c.weight||1) * varietyFactor(c.id, messageHistory, now),
-    emotion:c.emotion||null,
-    text: typeof c.text==="function" ? c.text(ctx) : c.text,
-  }));
-  return pickTopPriority(candidates);
-}
 
 // ─── MEAL BUILDER INTELLIGENTE (v1.9 · iterativo dalla v1.9.2) ─────────────────
 // Il builder esisteva già dalla v1.4.1, ma componeva solo ciò che l'utente
@@ -930,59 +801,196 @@ function substituteMealIngredient({ suggestion, slot, gKcal, totalKcal, foodDB, 
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// SEZIONE 6 · FOX ENGINE
-// Tutto ciò che riguarda la volpe come personaggio: mood, reazione ai pasti
-// (effetto su fame/energia/felicità), e le librerie di dialogo (reazioni,
-// ambient) con il loro contesto.
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SEZIONE 5 · MESSAGE ENGINE
+// Tutto ciò che riguarda "cosa dice la volpe": il motore di selezione
+// (priorità + varietà, v1.7/v1.9.5) e le librerie di dialogo (reazione al
+// pasto, didascalia ambient) con il loro contesto. Dalla v2.0 questo motore
+// non legge più dailyLog: consulta esclusivamente gli stati strutturati
+// restituiti da User Profile, User Memory, Nutrition Engine e Fox Engine —
+// la stessa disciplina già in vigore per INSIGHT_MESSAGES (nutritionState) è
+// ora estesa anche ad AMBIENT_MESSAGES/REACTION_MESSAGES (foxState/
+// userMemory).
 // ═════════════════════════════════════════════════════════════════════════════
 
-// ─── Mood ───────────────────────────────────────────────────────────────────
-// ─── MOOD SYSTEM (stati intermedi, v1.4) ──────────────────────────────────────
-// Il mood non scatta da uno stato all'altro in un colpo solo. MOOD_ORDER
-// definisce una scala continua; ad ogni aggiornamento dello stato (decay
-// periodico o pasto) calcoliamo il mood "target" in base alle statistiche
-// attuali, ma il mood effettivamente mostrato si sposta di un solo gradino
-// per volta verso il target.
-export const MOOD_ORDER = ["sad", "neutral", "content", "happy", "excited"];
- 
-function computeTargetMoodIndex(hunger, energy, happiness) {
-  if (hunger > 75 || happiness < 25 || energy < 25) return 0; // sad
-  if (hunger < 25 && energy > 60 && happiness > 70) return 4; // excited
-  if (hunger < 40 && energy > 45 && happiness > 55) return 3; // happy
-  if (hunger < 55 && energy > 35 && happiness > 40) return 2; // content
-  return 1; // neutral
-}
- 
-// Sposta l'indice corrente di un solo passo verso il target (mai di scatto)
-function stepMoodIndex(currentIndex, targetIndex) {
-  if (currentIndex == null) return targetIndex;
-  if (currentIndex === targetIndex) return currentIndex;
-  return currentIndex + Math.sign(targetIndex - currentIndex);
+// ─── Motore di selezione messaggi (priorità + varietà) ─────────────────────
+// ─── MOTORE DECISIONALE UNIFICATO (v1.7 · sistema di varietà in v1.9.5) ────────
+// Prima ogni superficie (didascalia in home, popup dopo il pasto, headline del
+// coach) aveva la propria logica di scelta del messaggio: un if/else in
+// ordine di priorità per la didascalia, un pescaggio pesato per il popup, un
+// altro if/else per la headline. Le regole erano equivalenti nello spirito
+// ("mostra prima ciò che conta di più") ma implementate tre volte in modo
+// diverso. Ora un'unica coppia di funzioni primitive gestisce la selezione
+// per tutte e tre le superfici:
+//
+//  - pickTopPriority(candidati): dato un elenco già filtrato per eleggibilità,
+//    sceglie il candidato di priorità più alta (numero più basso = più
+//    importante); a parità di priorità sceglie a caso pesato tra i pari.
+//  - selectMessage(libreria, ctx, storico): valuta condition() e cooldown per
+//    ogni voce della libreria, poi delega a pickTopPriority.
+//
+// Il cooldown (persistito in nf_msgHistory) evita che un "fatto" via via
+// meno urgente di un avviso importante si ripeta troppo spesso — le regole
+// generali sono le stesse per tutte le superfici, cambia solo la libreria di
+// contenuti che ciascuna consulta.
+//
+// v1.9.5: il cooldown da solo è un interruttore on/off (o è passato abbastanza
+// tempo o no) e non impedisce a un messaggio di tornare a ripetersi appena il
+// cooldown scade, se resta l'unico candidato idoneo in quel momento. Manca
+// una vera memoria di "questa frase è stata mostrata troppe volte". Il
+// sistema di varietà aggiunge due meccanismi, entrambi basati sullo stesso
+// storico già persistito (nf_msgHistory), esteso da un timestamp a
+// { last, count }:
+//   1. Penalità morbida sul peso: più un messaggio è stato mostrato di
+//      recente, meno probabile è che vinca un pareggio di priorità con un
+//      altro candidato altrettanto idoneo (pickTopPriority resta invariato,
+//      riceve solo pesi già scontati).
+//   2. Esclusione temporanea (fatica): oltre una soglia di ripetizioni
+//      ravvicinate, il messaggio viene escluso del tutto da questo turno di
+//      selezione — MA solo se esiste almeno un'alternativa idonea; se fosse
+//      l'unico candidato possibile, torna comunque eleggibile (mai un
+//      "silenzio" pur di rispettare la varietà).
+// Il contatore si azzera da solo se il messaggio non viene rivisto per
+// VARIETY_DECAY_HOURS: la fatica è sempre relativa al periodo recente, non
+// un giudizio permanente sul messaggio.
+
+const VARIETY_DECAY_HOURS   = 12;   // oltre questa pausa, il conteggio riparte da zero
+const VARIETY_SUPPRESS_AFTER = 3;   // mostrato 3+ volte di recente → escluso se c'è un'alternativa
+const VARIETY_PENALTY        = 0.35; // quanto pesa ogni mostra recente sul peso (soft)
+
+// Storico prima della v1.9.5: nf_msgHistory salvava solo un timestamp numerico
+// per id. Normalizza il formato vecchio in { last, count:1 } così un utente
+// che aggiorna l'app non perde né rompe lo storico già accumulato.
+function normalizeHistoryEntry(raw) {
+  if (raw == null) return null;
+  if (typeof raw === "number") return { last: raw, count: 1 };
+  return raw;
 }
 
-// ─── Effetto di un pasto su fame/energia/felicità ──────────────────────────
-// ─── NUTRIZIONE ────────────────────────────────────────────────────────────────
-// Stima qualità pasto 0-1 basata su bilanciamento macro (non solo calorie)
-function mealQuality(food) {
-  const p = food.p||0, c = food.c||0, f = food.f||0;
-  const tot = p+c+f;
-  if (tot === 0) return 0.5;
-  const pRatio = p/tot;
-  let q = 0.45 + pRatio*0.4;
-  if (f/tot > 0.55) q -= 0.15;
-  return Math.max(0.2, Math.min(1, q));
+function varietyFactor(id, messageHistory, now) {
+  const entry = normalizeHistoryEntry(messageHistory[id]);
+  if (!entry) return 1;
+  if (now-entry.last >= VARIETY_DECAY_HOURS*3600000) return 1; // troppo tempo fa, nessuna penalità
+  return 1/(1+VARIETY_PENALTY*(entry.count||1));
+}
+
+function isFatigued(id, messageHistory, now) {
+  const entry = normalizeHistoryEntry(messageHistory[id]);
+  if (!entry) return false;
+  if (now-entry.last >= VARIETY_DECAY_HOURS*3600000) return false;
+  return (entry.count||0) >= VARIETY_SUPPRESS_AFTER;
+}
+
+function pickTopPriority(eligible) {
+  if (eligible.length === 0) return null;
+  const topPriority = Math.min(...eligible.map(c=>c.priority));
+  const topTier = eligible.filter(c=>c.priority===topPriority);
+  const totalWeight = topTier.reduce((s,c)=>s+(c.weight||1),0);
+  let r = Math.random()*totalWeight;
+  for (const c of topTier) {
+    const w = c.weight||1;
+    if (r < w) return c;
+    r -= w;
+  }
+  return topTier[topTier.length-1];
 }
  
-function getFoodEffect(food) {
-  const quality = mealQuality(food);
-  const happinessDelta = Math.round(8 + quality*12); // 8-20
-  switch(food.type) {
-    case "protein": return { hungerDelta:-35, energyDelta:+20, happinessDelta, label:"Energia stabile!"   , reaction:"energetic" };
-    case "carb":    return { hungerDelta:-30, energyDelta:+30, happinessDelta, label:"Carica subito!"     , reaction:"energetic" };
-    case "fat":     return { hungerDelta:-25, energyDelta:+10, happinessDelta, label:"Sazio e calmo!"     , reaction:"neutral"   };
-    case "light":   return { hungerDelta:-15, energyDelta:+8,  happinessDelta, label:"Leggero e fresco!"  , reaction:"happy"     };
-    default:        return { hungerDelta:-20, energyDelta:+15, happinessDelta, label:"Buono!"             , reaction:"happy"     };
-  }
+function selectMessage(library, ctx, messageHistory, now=Date.now()) {
+  const eligible = library.filter(c => {
+    if (!c.condition(ctx)) return false;
+    if (c.cooldownMin>0) {
+      const entry = normalizeHistoryEntry(messageHistory[c.id]);
+      if (entry && now-entry.last < c.cooldownMin*60000) return false;
+    }
+    return true;
+  });
+  // "Freschi": idonei e non affaticati da troppe ripetizioni ravvicinate. Se
+  // rimane qualcosa, si sceglie solo da lì; altrimenti si ripiega sull'intero
+  // insieme idoneo — la varietà non deve mai produrre un silenzio.
+  const fresh = eligible.filter(c => !isFatigued(c.id, messageHistory, now));
+  const pool = fresh.length ? fresh : eligible;
+  const candidates = pool.map(c => ({
+    id:c.id, priority:c.priority,
+    weight:(c.weight||1) * varietyFactor(c.id, messageHistory, now),
+    emotion:c.emotion||null,
+    text: typeof c.text==="function" ? c.text(ctx) : c.text,
+  }));
+  return pickTopPriority(candidates);
+}
+
+// ─── Headline del coach (sceglie da nutritionState) ────────────────────────
+// Superficie "insight": la headline della card Coach in home. Stessa priorità
+// di sempre (nutriente mancante > equilibrio pasti > distribuzione > trend >
+// presenza leggera). v2.0: legge esclusivamente `nutritionState` (prodotto da
+// Nutrition Engine) — non calcola più nulla da dailyLog/targets direttamente,
+// coerente con la regola "il motore messaggi usa solo stati strutturati".
+// v1.9.7: ogni voce appartiene esplicitamente a un timeframe — "today" (fatto
+// isolato di oggi), "week_habit" (si ripete nella settimana, non più un
+// caso), "week_progress" (confronto con la settimana scorsa: qui la volpe
+// inizia a parlare di progressi, non solo di stato attuale).
+const INSIGHT_TIMEFRAMES = {
+  ins_missing_nutrient:"today", ins_fat_heavy:"today", ins_low_protein_balance:"today",
+  ins_distribution:"today", ins_all_good:"today",
+  ins_trend_up:"week_habit", ins_trend_down:"week_habit",
+  ins_weekly_habit_fat:"week_habit", ins_weekly_habit_protein:"week_habit", ins_weekly_meal_pattern:"week_habit",
+  ins_progress_protein_up:"week_progress", ins_progress_protein_down:"week_progress",
+  ins_progress_ontarget_up:"week_progress", ins_progress_logged_up:"week_progress",
+};
+
+const INSIGHT_MESSAGES = [
+  // ── today: problema isolato di oggi ────────────────────────────────────
+  { id:"ins_missing_nutrient", priority:2, cooldownMin:0,
+    condition: ctx => !!ctx.missingNutrient,
+    text: ctx => `Ti mancano circa ${ctx.missingNutrient.missingGrams}g di ${ctx.missingNutrient.nutrient} rispetto al tuo obiettivo di oggi.` },
+  { id:"ins_fat_heavy", priority:2, cooldownMin:0,
+    condition: ctx => ctx.mealBalance?.type==="fat_heavy",
+    text: ctx => `Oggi i pasti sono piuttosto ricchi di grassi (${ctx.mealBalance.pct}% delle calorie).` },
+  { id:"ins_low_protein_balance", priority:2, cooldownMin:0,
+    condition: ctx => ctx.mealBalance?.type==="low_protein",
+    text: ctx => `Potresti aggiungere più proteine ai prossimi pasti (solo ${ctx.mealBalance.pct}% delle calorie finora).` },
+  { id:"ins_distribution", priority:2, cooldownMin:0,
+    condition: ctx => !!ctx.distribution,
+    text: ctx => `${ctx.distribution.meal} ha coperto il ${ctx.distribution.pct}% delle calorie di oggi: prova a distribuirle meglio nei prossimi giorni.` },
+  // ── week_habit: si ripete nella settimana, non più un caso isolato ─────
+  { id:"ins_trend_up", priority:4, cooldownMin:0,
+    condition: ctx => ctx.trend?.direction==="up",
+    text: ctx => `Le tue calorie medie sono in aumento negli ultimi giorni (~${ctx.trend.avg} kcal/giorno).` },
+  { id:"ins_trend_down", priority:4, cooldownMin:0,
+    condition: ctx => ctx.trend?.direction==="down",
+    text: ctx => `Le tue calorie medie sono in calo negli ultimi giorni (~${ctx.trend.avg} kcal/giorno).` },
+  { id:"ins_weekly_habit_fat", priority:3, cooldownMin:720,
+    condition: ctx => ctx.weeklyHabit?.type==="fat_heavy",
+    text: ctx => `Non è solo oggi: i pasti sono stati ricchi di grassi per ${ctx.weeklyHabit.days} giorni su ${ctx.weeklyHabit.totalDays} questa settimana.` },
+  { id:"ins_weekly_habit_protein", priority:3, cooldownMin:720,
+    condition: ctx => ctx.weeklyHabit?.type==="low_protein",
+    text: ctx => `Le proteine sono state basse ${ctx.weeklyHabit.days} giorni su ${ctx.weeklyHabit.totalDays} questa settimana — è diventata un'abitudine.` },
+  { id:"ins_weekly_meal_pattern", priority:4, cooldownMin:720,
+    condition: ctx => !!ctx.weeklyMealPattern,
+    text: ctx => `${ctx.weeklyMealPattern.meal} copre in media il ${ctx.weeklyMealPattern.avgPct}% delle calorie della giornata questa settimana.` },
+  // ── week_progress: confronto con la settimana scorsa ───────────────────
+  { id:"ins_progress_protein_up", priority:3, cooldownMin:720,
+    condition: ctx => ctx.weekOverWeek?.metric==="protein" && ctx.weekOverWeek.delta>0,
+    text: ctx => `Questa settimana le tue proteine medie sono più alte della scorsa (+${ctx.weekOverWeek.delta}%) — bel progresso! 💪` },
+  { id:"ins_progress_protein_down", priority:4, cooldownMin:720,
+    condition: ctx => ctx.weekOverWeek?.metric==="protein" && ctx.weekOverWeek.delta<0,
+    text: ctx => `Questa settimana le proteine medie sono un po' più basse della scorsa (${ctx.weekOverWeek.delta}%).` },
+  { id:"ins_progress_ontarget_up", priority:3, cooldownMin:720,
+    condition: ctx => ctx.weekOverWeek?.metric==="onTarget" && ctx.weekOverWeek.delta>0,
+    text: ctx => `Questa settimana hai centrato il target calorico ${ctx.weekOverWeek.delta} giorni in più della scorsa!` },
+  { id:"ins_progress_logged_up", priority:3, cooldownMin:720,
+    condition: ctx => ctx.weekOverWeek?.metric==="logged" && ctx.weekOverWeek.delta>0,
+    text: ctx => `Hai registrato ${ctx.weekOverWeek.delta} giorni in più questa settimana rispetto alla scorsa — sempre più costante!` },
+  // ── today: presenza leggera di riserva ──────────────────────────────────
+  { id:"ins_all_good", priority:5, cooldownMin:0,
+    condition: () => true,
+    text: () => "Stai mantenendo un buon equilibrio nutrizionale, continua così!" },
+];
+
+function pickNutritionHeadline(nutritionState, messageHistory) {
+  const picked = selectMessage(INSIGHT_MESSAGES, nutritionState, messageHistory);
+  const headlineTimeframe = INSIGHT_TIMEFRAMES[picked.id] || "today";
+  return { headline: picked.text, headlineId: picked.id, headlineTimeframe };
 }
 
 // ─── LIBRERIE DI CONTENUTO ──────────────────────────────────────────────────────
@@ -1099,6 +1107,244 @@ function buildAmbientContext(base) {
   return { ...base, frequentFood, breakfastRoutine: routines.Colazione||null, lunchRoutine: routines.Pranzo||null, dinnerRoutine: routines.Cena||null, hydrationWeak };
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// SEZIONE 6 · FOX ENGINE
+// Il vero centro della parte comportamentale (v2.0). Non solo mood/energia
+// (esistenti dalla v1.4) ma un modello completo e unico dello stato della
+// volpe — foxState — che include emotion, energy, relationship, trust,
+// experience, curiosity, personality, memory, behavior. Tutto calcolato in
+// modo deterministico da dati già presenti nell'app (dailyLog, streak,
+// userMemory, customRecipes), MAI da uno store separato che potrebbe
+// disallinearsi — stesso principio già seguito da getUserMemory. Ogni altro
+// modulo (UI, Message Engine, futura AI) legge solo foxState, mai le singole
+// variabili grezze.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ─── Mood ───────────────────────────────────────────────────────────────────
+// ─── MOOD SYSTEM (stati intermedi, v1.4) ──────────────────────────────────────
+// Il mood non scatta da uno stato all'altro in un colpo solo. MOOD_ORDER
+// definisce una scala continua; ad ogni aggiornamento dello stato (decay
+// periodico o pasto) calcoliamo il mood "target" in base alle statistiche
+// attuali, ma il mood effettivamente mostrato si sposta di un solo gradino
+// per volta verso il target.
+export const MOOD_ORDER = ["sad", "neutral", "content", "happy", "excited"];
+ 
+function computeTargetMoodIndex(hunger, energy, happiness) {
+  if (hunger > 75 || happiness < 25 || energy < 25) return 0; // sad
+  if (hunger < 25 && energy > 60 && happiness > 70) return 4; // excited
+  if (hunger < 40 && energy > 45 && happiness > 55) return 3; // happy
+  if (hunger < 55 && energy > 35 && happiness > 40) return 2; // content
+  return 1; // neutral
+}
+ 
+// Sposta l'indice corrente di un solo passo verso il target (mai di scatto)
+function stepMoodIndex(currentIndex, targetIndex) {
+  if (currentIndex == null) return targetIndex;
+  if (currentIndex === targetIndex) return currentIndex;
+  return currentIndex + Math.sign(targetIndex - currentIndex);
+}
+
+// ─── Effetto di un pasto su fame/energia/felicità ──────────────────────────
+// ─── NUTRIZIONE ────────────────────────────────────────────────────────────────
+// Stima qualità pasto 0-1 basata su bilanciamento macro (non solo calorie)
+function mealQuality(food) {
+  const p = food.p||0, c = food.c||0, f = food.f||0;
+  const tot = p+c+f;
+  if (tot === 0) return 0.5;
+  const pRatio = p/tot;
+  let q = 0.45 + pRatio*0.4;
+  if (f/tot > 0.55) q -= 0.15;
+  return Math.max(0.2, Math.min(1, q));
+}
+ 
+function getFoodEffect(food) {
+  const quality = mealQuality(food);
+  const happinessDelta = Math.round(8 + quality*12); // 8-20
+  switch(food.type) {
+    case "protein": return { hungerDelta:-35, energyDelta:+20, happinessDelta, label:"Energia stabile!"   , reaction:"energetic" };
+    case "carb":    return { hungerDelta:-30, energyDelta:+30, happinessDelta, label:"Carica subito!"     , reaction:"energetic" };
+    case "fat":     return { hungerDelta:-25, energyDelta:+10, happinessDelta, label:"Sazio e calmo!"     , reaction:"neutral"   };
+    case "light":   return { hungerDelta:-15, energyDelta:+8,  happinessDelta, label:"Leggero e fresco!"  , reaction:"happy"     };
+    default:        return { hungerDelta:-20, energyDelta:+15, happinessDelta, label:"Buono!"             , reaction:"happy"     };
+  }
+}
+
+// ─── Mappa nome alimento → gruppo alimentare ───────────────────────────────
+// Costruita una sola volta da ALL_FOODS (dati statici, non cambiano a
+// runtime) — usata dal calcolo della curiosità per contare i GRUPPI
+// alimentari distinti provati, non solo i singoli nomi.
+const FOOD_GROUP_MAP = Object.fromEntries(ALL_FOODS.map(f => [f.name, f.gruppo]));
+
+// ─── Statistiche di vita dell'app ──────────────────────────────────────────
+// Un'unica scansione di TUTTO il dailyLog (non solo gli ultimi N giorni) per
+// i fatti cumulativi: da quanto tempo l'utente usa l'app, quanti giorni/pasti
+// in totale. Base per experience e relationship — mai un contatore isolato.
+function computeLifetimeStats(dailyLog) {
+  const keys = Object.keys(dailyLog).filter(k => dailyLog[k]?.meals?.length>0).sort();
+  if (!keys.length) return { totalDaysLogged:0, totalMealsLogged:0, firstDayKey:null, daysSinceFirstUse:0 };
+  const totalMealsLogged = keys.reduce((s,k)=>s+dailyLog[k].meals.length,0);
+  const firstDayKey = keys[0];
+  const daysSinceFirstUse = Math.max(0, Math.round((Date.now()-new Date(firstDayKey).getTime())/86400000));
+  return { totalDaysLogged: keys.length, totalMealsLogged, firstDayKey, daysSinceFirstUse };
+}
+
+// Streak più lunga MAI raggiunta (non solo quella attuale) — un'unica
+// scansione cronologica di tutta la storia, non gli ultimi 60 giorni come
+// getStreak (che serve a uno scopo diverso: la streak "viva" di oggi).
+function computeBestStreakEver(dailyLog) {
+  const keys = Object.keys(dailyLog).filter(k => dailyLog[k]?.meals?.length>0).sort();
+  if (!keys.length) return 0;
+  let best = 1, current = 1;
+  for (let i=1;i<keys.length;i++){
+    const diffDays = Math.round((new Date(keys[i]) - new Date(keys[i-1]))/86400000);
+    current = diffDays===1 ? current+1 : 1;
+    if (current>best) best = current;
+  }
+  return best;
+}
+
+// ─── Esperienza (crescita, non un contatore) ───────────────────────────────
+// Combina da quanto tempo l'utente usa l'app, la streak più lunga mai
+// raggiunta, quanti obiettivi settimanali sta centrando di recente, la
+// varietà alimentare, e la costanza nel tempo (giorni loggati sul totale dei
+// giorni da quando ha iniziato) — non "giorni × pasti". Scala 0-100.
+function computeExperience({ lifetimeStats, bestStreakEver, distinctFoodsCount, weeklyGoals }) {
+  const usageScore       = Math.min(100, lifetimeStats.daysSinceFirstUse/2);            // ~200 giorni = pieno
+  const streakScore      = Math.min(100, (bestStreakEver/30)*100);
+  const goalsScore       = weeklyGoals?.length ? (weeklyGoals.filter(g=>g.done).length/weeklyGoals.length)*100 : 0;
+  const varietyScore     = Math.min(100, distinctFoodsCount*2);                          // 50 alimenti distinti = pieno
+  const consistencyScore = lifetimeStats.daysSinceFirstUse>0
+    ? Math.min(100, (lifetimeStats.totalDaysLogged/lifetimeStats.daysSinceFirstUse)*100)
+    : 0;
+  const score = usageScore*0.25 + streakScore*0.3 + goalsScore*0.2 + varietyScore*0.1 + consistencyScore*0.15;
+  return Math.round(Math.max(0, Math.min(100, score)));
+}
+
+// ─── Fiducia (prevedibilità, non regolarità) ───────────────────────────────
+// Non misura quanto l'utente è regolare in astratto, ma quanto la volpe
+// riesce a PREVEDERNE il comportamento: routine con orari stabili
+// (spreadHours basso, v2.0) alimentano la fiducia più di una semplice
+// frequenza grezza. Media pesata sui campioni disponibili di ciascun pasto.
+function computeTrust(mealRoutines) {
+  const routines = Object.values(mealRoutines || {}).filter(Boolean);
+  if (!routines.length) return 50; // nessuna routine ancora riconoscibile: punto di partenza neutro
+  let weightedSum = 0, totalWeight = 0;
+  routines.forEach(r => {
+    const predictability = Math.max(0, 100 - r.spreadHours*25); // spread di 4h → predictability 0
+    weightedSum += predictability*r.samples;
+    totalWeight += r.samples;
+  });
+  return Math.round(totalWeight ? weightedSum/totalWeight : 50);
+}
+
+// ─── Curiosità (esplorazione, non solo conteggio alimenti) ────────────────
+// Non solo quanti alimenti diversi, ma quanti GRUPPI alimentari distinti
+// (varietà di categorie, non solo di nomi) e quante ricette personalizzate
+// create — tre segnali diversi di "quanto esplora", combinati insieme.
+function computeCuriosity({ dailyLog, customRecipes, days=30 }) {
+  const names = new Set(), groups = new Set();
+  lastNDayKeys(days).forEach(k => {
+    (dailyLog[k]?.meals||[]).forEach(m => {
+      names.add(m.name);
+      const g = FOOD_GROUP_MAP[m.name];
+      if (g) groups.add(g);
+    });
+  });
+  const foodScore   = Math.min(100, names.size*4);    // 25 alimenti distinti/mese = pieno
+  const groupScore  = Math.min(100, groups.size*10);  // 10 gruppi distinti = pieno (~14 esistono in FoodDB)
+  const recipeScore = Math.min(100, (customRecipes?.length||0)*15);
+  return Math.round(foodScore*0.5 + groupScore*0.35 + recipeScore*0.15);
+}
+
+// ─── Relationship Score ─────────────────────────────────────────────────────
+// Uno degli attributi di foxState tra altri (v2.0) — non più il fulcro del
+// sistema. Costanza recente, streak, obiettivi raggiunti, continuità d'uso.
+// In futuro altri indicatori (attachment, confidence...) potranno affiancarlo
+// come nuovi attributi paralleli, senza richiedere di riprogettare il modello.
+function computeRelationshipScore({ streak, lifetimeStats, weeklyGoals }) {
+  const streakScore      = Math.min(100, (streak/30)*100);
+  const consistencyScore = lifetimeStats.daysSinceFirstUse>0
+    ? Math.min(100, (lifetimeStats.totalDaysLogged/Math.min(30, lifetimeStats.daysSinceFirstUse||1))*100)
+    : 0;
+  const goalsScore    = weeklyGoals?.length ? (weeklyGoals.filter(g=>g.done).length/weeklyGoals.length)*100 : 50;
+  const continuityScore = lifetimeStats.daysSinceFirstUse>=1 ? 100 : 0; // presenza storica minima già accertata
+  return Math.round(streakScore*0.35 + consistencyScore*0.3 + goalsScore*0.25 + continuityScore*0.1);
+}
+
+// ─── Personalità (statica per ora) ─────────────────────────────────────────
+// Tratti di temperamento di base, non ancora derivati dal comportamento (a
+// differenza degli attributi dinamici sopra) — predisposizione per future
+// varianti di personalità e per l'integrazione AI, che potrà modulare il tono
+// in base a questi tratti senza toccare la logica decisionale.
+const FOX_PERSONALITY = { optimism:0.6, curiosity:0.55, calm:0.5, playfulness:0.55 };
+
+// ─── Memoria emozionale ─────────────────────────────────────────────────────
+// Non solo l'ultimo evento significativo, ma anche i momenti speciali della
+// storia dell'utente — prima streak settimanale, primo ritorno dopo una
+// pausa — per dare continuità al rapporto nel tempo, non solo un'istantanea
+// di oggi. Un'unica scansione cronologica di dailyLog produce tutto insieme.
+function computeFoxMemory({ dailyLog, weeklyGoals }) {
+  const keys = Object.keys(dailyLog).filter(k => dailyLog[k]?.meals?.length>0).sort();
+  const milestones = [];
+  let current = 1, firstWeekDate = null, longestGap = 0, firstReturnDate = null;
+  for (let i=1;i<keys.length;i++){
+    const diffDays = Math.round((new Date(keys[i]) - new Date(keys[i-1]))/86400000);
+    if (diffDays===1) {
+      current++;
+      if (current===7 && !firstWeekDate) firstWeekDate = keys[i];
+    } else {
+      if (diffDays-1 > longestGap) longestGap = diffDays-1;
+      if (diffDays>=5 && !firstReturnDate) firstReturnDate = keys[i];
+      current = 1;
+    }
+  }
+  if (keys.length) milestones.push({ type:"first_use", date:keys[0], label:"Primo giorno insieme" });
+  if (firstWeekDate) milestones.push({ type:"first_week_streak", date:firstWeekDate, label:"Prima settimana intera di streak" });
+  if (firstReturnDate) milestones.push({ type:"return_after_break", date:firstReturnDate, label:"Primo ritorno dopo una pausa" });
+  milestones.sort((a,b)=> a.date<b.date ? -1 : 1);
+
+  const lastUsedDay = keys.length ? keys[keys.length-1] : null;
+  const lastSignificantEvent = milestones.length ? milestones[milestones.length-1] : null;
+  const lastDifficulty = longestGap>=3 ? { type:"long_gap", days:longestGap, label:`Una pausa di ${longestGap} giorni` } : null;
+  const lastEncouragement = weeklyGoals?.some(g=>g.done)
+    ? { type:"weekly_goal", label:"Traguardo settimanale raggiunto" }
+    : null;
+
+  return { lastSignificantEvent, lastUsedDay, lastDifficulty, lastEncouragement, milestones };
+}
+
+// ─── Punto di ingresso unico: foxState ─────────────────────────────────────
+// Un solo oggetto che rappresenta TUTTO lo stato della volpe. Ogni altro
+// modulo (UI, Message Engine, futura AI) legge solo questo, mai le singole
+// variabili grezze. Sempre ricalcolato dai dati già esistenti nell'app
+// (dailyLog, streak, userMemory, customRecipes, vitals) — mai da uno store
+// separato che potrebbe disallinearsi, stesso principio già seguito da
+// getUserMemory. Deterministico, zero Math.random(), memoizzato nell'hook.
+function computeFoxState({ vitals, mood, streak, hoursSinceLastFed, dailyLog, userMemory, customRecipes, weeklyGoals }) {
+  const lifetimeStats = computeLifetimeStats(dailyLog);
+  const bestStreakEver = computeBestStreakEver(dailyLog);
+  const distinctFoodsCount = userMemory?.foodMemory ? Object.keys(userMemory.foodMemory).length : 0;
+
+  const experience   = computeExperience({ lifetimeStats, bestStreakEver, distinctFoodsCount, weeklyGoals });
+  const trust        = computeTrust(userMemory?.mealRoutines);
+  const curiosity     = computeCuriosity({ dailyLog, customRecipes });
+  const relationship = computeRelationshipScore({ streak, lifetimeStats, weeklyGoals });
+  const memory        = computeFoxMemory({ dailyLog, weeklyGoals });
+
+  return {
+    emotion: { mood, hunger:vitals.hunger, happiness:vitals.happiness??70, health:vitals.health??90 },
+    energy: vitals.energy,
+    relationship,
+    trust,
+    experience,
+    curiosity,
+    personality: FOX_PERSONALITY,
+    memory,
+    behavior: { lastFedAt:vitals.lastFedAt, hoursSinceLastFed, streak, bestStreakEver },
+  };
+}
+
+
 // ─────────────────────────────────────────────────────────────────────────────
 // HOOK PRINCIPALE — tutto lo stato persistito, le derivazioni e le azioni.
 // App.jsx chiama questo hook una volta e usa l'oggetto restituito per il
@@ -1120,7 +1366,11 @@ export function useNutriFox() {
   const chatEndRef = useRef(null);
  
   // Fox state — happiness, health, lastFedAt, moodIndex (stati intermedi v1.4)
-  const [foxState,  setFoxState]  = useState(()=>load("nf_foxstate",{hunger:50,energy:50,happiness:70,health:90,lastFedAt:null,moodIndex:1,lastDecayAt:Date.now()}));
+  // Stato biologico grezzo della volpe (fame/energia/felicità/salute, tick-based).
+  // v2.0: rinominato da foxState a fxVitals — è un INPUT grezzo che decade nel
+  // tempo, non lo stato completo della volpe. Il vero foxState (più sotto) è un
+  // oggetto derivato, ricalcolato ogni volta da fxVitals + dati esistenti.
+  const [fxVitals,  setFxVitals]  = useState(()=>load("nf_foxstate",{hunger:50,energy:50,happiness:70,health:90,lastFedAt:null,moodIndex:1,lastDecayAt:Date.now()}));
   const [bounce,    setBounce]    = useState(false);
   const [feedLabel, setFeedLabel] = useState("");
   const [reaction,  setReaction]  = useState(null); // {type, message} — popup temporaneo 2-3s
@@ -1154,7 +1404,7 @@ export function useNutriFox() {
   useEffect(()=>save("nf_recent",recentFoods),[recentFoods]);
   useEffect(()=>save("nf_recipes",customRecipes),[customRecipes]);
   useEffect(()=>save("nf_water_"+todayKey(),water),[water]);
-  useEffect(()=>save("nf_foxstate",foxState),[foxState]);
+  useEffect(()=>save("nf_foxstate",fxVitals),[fxVitals]);
   useEffect(()=>save("nf_aimsg",aiMessages.slice(-40)),[aiMessages]);
   useEffect(()=>{ chatEndRef.current?.scrollIntoView({behavior:"smooth"}); },[aiMessages]);
   useEffect(()=>save("nf_celebrated_"+todayKey(),celebratedToday),[celebratedToday]);
@@ -1169,7 +1419,7 @@ export function useNutriFox() {
   // con un tetto di 6 ore per evitare valori assurdi se l'app resta chiusa a
   // lungo — oltre quella soglia la volpe è comunque già "addormentata" via pose.
   useEffect(()=>{
-    setFoxState(prev=>{
+    setFxVitals(prev=>{
       const lastDecay = prev.lastDecayAt || Date.now();
       const elapsedMin = Math.min(360, Math.max(0, (Date.now()-lastDecay)/60000));
       if (elapsedMin < 1) return { ...prev, lastDecayAt: Date.now() };
@@ -1187,7 +1437,7 @@ export function useNutriFox() {
   // moodIndex avanza di un solo gradino per tick verso il mood "target".
   useEffect(()=>{
     const iv = setInterval(()=>{
-      setFoxState(prev=>{
+      setFxVitals(prev=>{
         const hunger    = Math.min(100, prev.hunger+2);
         const energy    = Math.max(0, prev.energy-1);
         const happiness = hunger > 70 ? Math.max(0, (prev.happiness??70)-2) : (prev.happiness??70);
@@ -1205,7 +1455,7 @@ export function useNutriFox() {
   // streak itera fino a 60 giorni di log: memoizzato, ricalcola solo se dailyLog cambia
   const streak   = useMemo(()=>getStreak(dailyLog),[dailyLog]);
   const stage    = useMemo(()=>getFoxStage(streak),[streak]);
-  const mood     = MOOD_ORDER[foxState.moodIndex ?? computeTargetMoodIndex(foxState.hunger, foxState.energy, foxState.happiness??70)];
+  const mood     = MOOD_ORDER[fxVitals.moodIndex ?? computeTargetMoodIndex(fxVitals.hunger, fxVitals.energy, fxVitals.happiness??70)];
  
   function goalKcal(){
     const bmr=calcBMR(Number(profile.weight),Number(profile.height),Number(profile.age),profile.sex);
@@ -1239,17 +1489,36 @@ export function useNutriFox() {
     return Math.round(nonZero.reduce((s,k)=>s+k,0)/(nonZero.length||1));
   },[dailyLog]);
  
-  const hoursSinceLastFed = foxState.lastFedAt ? (Date.now()-foxState.lastFedAt)/3600000 : null;
+  const hoursSinceLastFed = fxVitals.lastFedAt ? (Date.now()-fxVitals.lastFedAt)/3600000 : null;
+
+  // v2.0: weeklyGoals calcolato una sola volta qui (prima veniva ricalcolato
+  // dentro getNutritionInsights) — condiviso da Nutrition Engine (nutritionState)
+  // e Fox Engine (foxState), nessuna duplicazione della stessa chiamata.
+  const weeklyGoals = useMemo(()=>getWeeklyGoals(dailyLog, gKcal, userMemory.hydration), [dailyLog, gKcal, userMemory]);
+
+  // Nutrition Engine: solo fatti, nessuna scelta di testo (v2.0).
+  const nutritionState = useMemo(()=>computeNutritionState({
+    dailyLog, todayMeals:todayData.meals, totalP, totalC, totalF, gKcal, totalKcal, targets, water, targetWater, weeklyGoals,
+  }),[dailyLog, todayData.meals, totalP, totalC, totalF, gKcal, totalKcal, targets, water, targetWater, weeklyGoals]);
+
+  // Fox Engine: un solo oggetto foxState con tutto lo stato della volpe
+  // (v2.0). Sempre ricalcolato da fxVitals + dati esistenti, mai da uno store
+  // a parte. Ogni altro modulo (UI, Message Engine) legge solo questo.
+  const foxState = useMemo(()=>computeFoxState({
+    vitals:fxVitals, mood, streak, hoursSinceLastFed, dailyLog, userMemory, customRecipes, weeklyGoals,
+  }),[fxVitals, mood, streak, hoursSinceLastFed, dailyLog, userMemory, customRecipes, weeklyGoals]);
  
   // Superficie "ambient" (didascalia in home): memoizzata sulle dipendenze
   // reali, non ricalcola ad ogni tick di decay se nulla di rilevante è
   // cambiato. Il cooldown viene registrato solo quando il messaggio
   // selezionato CAMBIA (transizione), non ad ogni render — altrimenti un
   // messaggio si auto-invaliderebbe l'istante dopo essere apparso.
+  // v2.0: non passa più `dailyLog` — legge solo userMemory (Memory Engine),
+  // coerente con "il motore messaggi usa solo stati strutturati".
   const ambientResult = useMemo(()=>selectMessage(AMBIENT_MESSAGES, buildAmbientContext({
     hoursSinceLastFed, water, targetWater, totalP, mealsCount:todayData.meals.length,
-    totalKcal, gKcal, mood, foxName, dailyLog, todayMeals:todayData.meals, userMemory,
-  }), messageHistory),[hoursSinceLastFed, water, targetWater, totalP, todayData.meals, totalKcal, gKcal, mood, foxName, dailyLog, messageHistory, userMemory]);
+    totalKcal, gKcal, mood, foxName, todayMeals:todayData.meals, userMemory,
+  }), messageHistory),[hoursSinceLastFed, water, targetWater, totalP, todayData.meals, totalKcal, gKcal, mood, foxName, messageHistory, userMemory]);
   const contextualMessage = ambientResult.text;
   // v1.8: quale emozione mostrare sul volto mentre questo messaggio è attivo.
   // Una ricompensa in corso (streak/obiettivo/acqua) vince sempre — è il
@@ -1263,13 +1532,12 @@ export function useNutriFox() {
     }
   },[ambientResult.id]);
  
-  // Motore di analisi nutrizionale (v1.6): combina target macro, equilibrio
-  // pasti, distribuzione calorica e trend recente. Memoizzato perché include
-  // un'analisi su 7 giorni di storico, non va ricalcolata ad ogni render.
-  // La headline (v1.7) passa dallo stesso motore/cooldown condiviso.
-  const insights = useMemo(()=>getNutritionInsights({
-    dailyLog, todayMeals:todayData.meals, totalP, totalC, totalF, gKcal, totalKcal, targets, water, targetWater, hydration:userMemory.hydration,
-  }, messageHistory),[dailyLog, todayData.meals, totalP, totalC, totalF, gKcal, totalKcal, targets, water, targetWater, messageHistory, userMemory]);
+  // Headline del coach: il Message Engine sceglie da nutritionState (v2.0),
+  // non calcola più nulla da sé. `insights` resta il nome esposto ad App.jsx
+  // per compatibilità, ma ora è la fusione di nutritionState + la scelta del
+  // Message Engine, invece di un'unica funzione che faceva entrambe le cose.
+  const headlinePick = useMemo(()=>pickNutritionHeadline(nutritionState, messageHistory),[nutritionState, messageHistory]);
+  const insights = { ...nutritionState, ...headlinePick };
   const prevInsightId = useRef(null);
   useEffect(()=>{
     if (insights.headlineId !== prevInsightId.current) {
@@ -1358,7 +1626,7 @@ Dati oggi:
 - Proteine: ${Math.round(totalP)}g, Carboidrati: ${Math.round(totalC)}g, Grassi: ${Math.round(totalF)}g
 - Acqua: ${water}/${targetWater} bicchieri
 - Streak: ${streak} giorni
-- Tuo stato: Fame ${Math.round(foxState.hunger)}%, Energia ${Math.round(foxState.energy)}%
+- Tuo stato: Fame ${Math.round(fxVitals.hunger)}%, Energia ${Math.round(fxVitals.energy)}%
 - Profilo: ${profile_str}
 - Obiettivo: ${GOALS[goalKey].label}
  
@@ -1407,7 +1675,7 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
     const message = buildReactionCandidates({
       reactionType, foodName:food.name, userMemory, mealType, waitedLong,
     });
-    setFoxState(prev=>{
+    setFxVitals(prev=>{
       const hunger    = Math.max(0,prev.hunger+effect.hungerDelta);
       const energy    = Math.min(100,prev.energy+effect.energyDelta);
       const happiness = Math.min(100,(prev.happiness??70)+effect.happinessDelta);
@@ -1450,15 +1718,20 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
     dailyLog, favorites, customRecipes, water, setWater,
     // coach AI
     aiMessages, aiInput, setAiInput, aiLoading, askFox, chatEndRef,
-    // stato volpe
+    // Fox Engine (v2.0): foxState è l'UNICO stato della volpe che il resto
+    // dell'app deve leggere — emotion/energy/relationship/trust/experience/
+    // curiosity/personality/memory/behavior. bounce/feedLabel/reaction/reward/
+    // licking restano variabili UI-transient separate (animazioni brevi, non
+    // stato "della volpe" in senso comportamentale).
     foxState, bounce, feedLabel, reaction, reward, licking, specialEmotion,
     // derivazioni
     today, todayData, streak, stage, mood, contextualMessage,
     totalKcal, totalP, totalC, totalF, gKcal, targetWater, weekAvg,
     // profilo utente unificato e memoria comportamentale (v1.9)
     userProfile, userMemory,
-    // motore di analisi nutrizionale (v1.6) — insights include ora anche
-    // weeklyGoals (v1.9)
+    // Nutrition Engine (v2.0): insights = nutritionState + la scelta di
+    // headline del Message Engine, fuse in un solo oggetto per compatibilità
+    // con chi già consultava `insights`.
     insights, suggestPortion: suggestPortionFor,
     // meal builder intelligente (v1.9, iterativo dalla v1.9.2)
     suggestMealFor, substituteMealIngredientFor,
@@ -1468,4 +1741,3 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
     addFood, addCustomFood, removeFood, saveRecipe, toggleFavorite,
   };
 }
- 
