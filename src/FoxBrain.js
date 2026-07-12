@@ -16,10 +16,22 @@ import { getAnimationIntent } from "./FoxAnimations";
 // prodotto perché computeFoxMood non lo restituisce mai. deriveVisualState()
 // unifica questo calcolo in un unico posto puro, usato sia da Fox.jsx (per
 // scegliere l'intent prima di chiamare gli hook) sia da useFoxBrain.
+//
+// v2.0: deriveStage ora è esportata (prima Fox.jsx ne teneva una copia
+// duplicata solo per il re-export verso App.jsx — eliminata). useFoxBrain
+// accetta due nuovi parametri opzionali, relationship e trust (da foxState,
+// Fox Engine in useNutriFox.js): influenzano SOLO warmthScale/glowOpacity,
+// elementi visivi secondari — mai lo stage, che continua a rappresentare
+// solo la crescita legata alla streak, come richiesto esplicitamente.
 // ─────────────────────────────────────────────────────────────────────────────
  
-// Stage in base alla streak
-function deriveStage(streak) {
+// Stage in base alla streak — rappresenta la CRESCITA della volpe. v2.0:
+// resta legato solo a streak, come da richiesta esplicita — il Relationship
+// Score non deve influenzare lo stage, solo elementi visivi secondari (vedi
+// warmthScale/glowOpacity più sotto). Esportata per eliminare la duplicazione
+// che esisteva con Fox.jsx (che ne teneva una copia identica solo per il
+// re-export verso App.jsx).
+export function deriveStage(streak) {
   if (streak >= 30) return { name:"Leggendaria", color:"#F9C74F", aura:true,  scale:1.12 };
   if (streak >= 14) return { name:"Adulta",      color:"#A78BFA", aura:false, scale:1.06 };
   if (streak >= 7)  return { name:"Giovane",     color:"#6FCF97", aura:false, scale:1.02 };
@@ -108,7 +120,15 @@ export function deriveVisualState({ mood, lastFedAt }) {
 // "proud"/"curious" richiesta dal motore decisionale) viene risolto una sola
 // volta in Fox.jsx e passato qui come resolvedVisualMood — questo hook non lo
 // ricalcola più da solo, usa deriveVisualState solo per pose/hoursSinceLastFed.
-export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood }) {
+//
+// v2.0: due nuovi parametri opzionali, relationship e trust (0-100, da
+// foxState). Come richiesto esplicitamente, NON toccano deriveStage — lo
+// stage rappresenta solo la crescita (streak) e resta esattamente come prima.
+// Influenzano invece due elementi visivi SECONDARI: warmthScale (un nudge di
+// scala minuscolo, max +2%, una postura leggermente più "aperta") e
+// glowOpacity (una luminosità/aura sottile indipendente da quella leggendaria
+// di stage.aura, visibile anche prima della Leggendaria se il legame è forte).
+export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood, relationship=50, trust=50 }) {
   return useMemo(() => {
     const stage               = deriveStage(streak);
     const colors               = deriveColors(streak);
@@ -118,14 +138,20 @@ export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, ear
     const intent              = getAnimationIntent(visualMood);
     const ex                  = MOOD_EXPR[visualMood] || MOOD_EXPR.neutral;
     const baseEarAngle        = EAR_ANGLES[ex.earMood] || EAR_ANGLES.up;
- 
+
+    // Warmth: media di relationship/trust, 0-1 — influenza SOLO elementi
+    // visivi secondari, mai lo stage (che resta legato solo alla streak).
+    const warmth       = Math.max(0, Math.min(1, (relationship + trust) / 200));
+    const warmthScale  = 1 + warmth*0.02;                 // fino a +2%, mai più
+    const glowOpacity  = Math.round(warmth*0.3*100)/100;  // 0 → 0.3, sottile
+
     // Le orecchie si abbassano in pose non-awake, reagiscono anche all'earTwitch
     const earAngle = pose !== "awake"
       ? { left: baseEarAngle.left + 10, right: baseEarAngle.right - 10 }
       : earTwitch
         ? { left: baseEarAngle.left + 8, right: baseEarAngle.right }
         : baseEarAngle;
- 
+
     // Animazione corpo — ora segue la pose reale, non solo il mood emotivo
     // v1.4: "stretch" (si stiracchia) ha priorità subito dopo bounce/hop
     // v1.8: "proud" riusa l'animazione excited (stesso brio, espressione diversa)
@@ -137,22 +163,25 @@ export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, ear
       : visualMood === "sad"      ? "fox-sad"
       : (visualMood === "excited" || visualMood === "proud") ? "fox-excited"
       : "fox-idle";
- 
+
     // Velocità coda: dipende da intent
     const tailSpeed = intent === "playful" ? "1.8s"
       : intent === "drowsy"                ? "5s"
       : intent === "sleepy"                ? "6s"
       : "3.5s";
- 
+
     return {
       // per FoxSVG (puramente visivo)
       ex, colors, stage, earAngle,
       // per il wrapper in Fox.jsx
       poseTransform, bodyAnim, tailSpeed,
+      // v2.0: influenza secondaria del legame (mai su FoxSVG direttamente —
+      // Fox.jsx le applica al wrapper CSS, non allo stage/ai colori)
+      warmthScale, glowOpacity,
       // metadati
       pose, visualMood, intent, hoursSinceLastFed,
     };
-  }, [mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood]);
+  }, [mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood, relationship, trust]);
 }
  
  
