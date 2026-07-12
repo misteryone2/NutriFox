@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, memo } from "react";
-import { useFoxBrain, deriveVisualState } from "./FoxBrain";
+import { useFoxBrain, deriveVisualState, deriveStage } from "./FoxBrain";
 import { useFoxAnimations, getAnimationIntent } from "./FoxAnimations";
 import FoxSVG from "./FoxSVG";
  
@@ -12,17 +12,19 @@ import FoxSVG from "./FoxSVG";
 // stessa funzione pura usata da useFoxBrain — prima veniva calcolato solo dal
 // mood grezzo, ignorando la pose fisica, e la volpe restava "attiva" (sguardi,
 // salti) anche quando il corpo era già addormentato o sdraiato.
+//
+// v2.0: getFoxStage non è più una copia locale — è deriveStage di FoxBrain.js,
+// semplicemente re-esportata per compatibilità con App.jsx (eliminata la
+// duplicazione). Due nuove prop opzionali, relationship/trust (da foxState,
+// Fox Engine in useNutriFox.js): alimentano warmthScale/glowOpacity in
+// FoxBrain (postura/luminosità, MAI lo stage) e vitality in FoxAnimations
+// (±10% su frequenza dei micro-eventi) — passate attraverso, non ricalcolate.
 // ─────────────────────────────────────────────────────────────────────────────
  
 // Re-export per compatibilità con App.jsx (che importa getFoxStage)
-export function getFoxStage(streak) {
-  if (streak >= 30) return { name:"Leggendaria", color:"#F9C74F", aura:true,  scale:1.12 };
-  if (streak >= 14) return { name:"Adulta",      color:"#A78BFA", aura:false, scale:1.06 };
-  if (streak >= 7)  return { name:"Giovane",     color:"#6FCF97", aura:false, scale:1.02 };
-  return                   { name:"Cucciolo",    color:"#F4845F", aura:false, scale:1.0  };
-}
+export { deriveStage as getFoxStage };
  
-function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFedAt = null, licking = false, specialEmotion = null }) {
+function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFedAt = null, licking = false, specialEmotion = null, relationship = 50, trust = 50 }) {
  
   // 1. Pose + visualMood di base con la stessa funzione pura usata da useFoxBrain.
   //    v1.8: se il motore decisionale chiede un'emozione speciale (proud/curious)
@@ -37,12 +39,15 @@ function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFed
   // riarmi ad ogni singolo render (hoursSinceLastFed cambia in continuazione).
   const hoursBucket = hoursSinceLastFed != null ? Math.round(hoursSinceLastFed*4)/4 : null;
  
-  // 2. Micro-animazioni idle: scheduler unico, valori boolean/numerici
-  const { blink, lookOffset, headTilt, tailFlick, earTwitch, hop, yawn, stretch } = useFoxAnimations(intent, hoursBucket);
+  // 2. Micro-animazioni idle: scheduler unico, valori boolean/numerici.
+  //    v2.0: vitality (0-1) = media di relationship/trust, modula lo
+  //    scheduler di ±10% al massimo (vedi FoxAnimations.js).
+  const vitality = Math.max(0, Math.min(1, (relationship + trust) / 200));
+  const { blink, lookOffset, headTilt, tailFlick, earTwitch, hop, yawn, stretch } = useFoxAnimations(intent, hoursBucket, vitality);
  
   // 3. Tutte le derivazioni visive: un oggetto unico, nessuna logica inline qui.
   //    Il visualMood già risolto sopra viene passato così com'è, non ricalcolato.
-  const brain = useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood: visualMood });
+  const brain = useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood: visualMood, relationship, trust });
  
   const { stage, poseTransform, bodyAnim, tailSpeed } = brain;
  
@@ -63,12 +68,23 @@ function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFed
   return (
     <div role="img" aria-label={`Volpe, stato: ${moodDescriptions[brain.visualMood] || "tranquilla"}`} style={{ position:"relative", display:"inline-block", lineHeight:0 }}>
  
-      {/* Aura leggendaria */}
+      {/* Aura leggendaria (solo stage, invariata) */}
       {stage.aura && (
         <div style={{
           position:"absolute", inset:-22, borderRadius:"50%",
           background:"radial-gradient(circle,#F9C74F40 0%,#F9C74F12 55%,transparent 70%)",
           animation:"aura 2.4s ease-in-out infinite", pointerEvents:"none",
+        }}/>
+      )}
+
+      {/* v2.0: luminosità secondaria legata al legame (relationship/trust) —
+          indipendente dall'aura leggendaria, sempre presente ma sottile,
+          non compete visivamente con lo stage. */}
+      {!stage.aura && brain.glowOpacity > 0.08 && (
+        <div style={{
+          position:"absolute", inset:-14, borderRadius:"50%",
+          background:`radial-gradient(circle, ${stage.color}${Math.round(brain.glowOpacity*255).toString(16).padStart(2,"0")} 0%, transparent 65%)`,
+          pointerEvents:"none",
         }}/>
       )}
  
@@ -90,7 +106,7 @@ function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFed
         style={{
           width: size,
           height: size * 1.18 * stage.scale,
-          transform: `scale(${stage.scale}) scaleY(${poseTransform.scaleY}) translateY(${poseTransform.offsetY}px)`,
+          transform: `scale(${stage.scale * brain.warmthScale}) scaleY(${poseTransform.scaleY}) translateY(${poseTransform.offsetY}px)`,
           transition: `transform ${poseTransform.transition}`,
           filter:`drop-shadow(0 10px 24px ${stage.color}50) drop-shadow(0 3px 8px #00000038)`,
         }}
