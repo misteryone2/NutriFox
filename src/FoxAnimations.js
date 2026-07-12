@@ -16,6 +16,12 @@ import { useState, useEffect, useRef } from "react";
 // combinazione di eventi non si ripete mai in modo identico. Aggiunto anche
 // l'intent "drowsy" (assopita, non ancora addormentata) e piccola variabilità
 // sulle durate degli eventi.
+//
+// v2.0: nuovo parametro opzionale `vitality` (0-1, da foxState — vedi
+// Fox.jsx/useNutriFox.js) modula nothingProb e i cooldown di ±10% al
+// massimo. La personalità di base (INTENT_WEIGHTS, i pesi relativi tra i
+// vari eventi) resta invariata — nessuna riscrittura dello scheduler, solo
+// un piccolo fattore moltiplicativo applicato ai due punti che già esistevano.
 // ─────────────────────────────────────────────────────────────────────────────
  
 const TICK_MIN = 550, TICK_MAX = 950; // risoluzione dello scheduler, con jitter
@@ -74,7 +80,14 @@ function pickWeightedEvent(weights) {
   return null;
 }
  
-export function useFoxAnimations(intent, hoursSinceLastFed = null) {
+// v2.0: nuovo parametro opzionale `vitality` (0-1, da foxState — media di
+// relationship/trust in Fox.jsx). Modula molto leggermente (±10% al
+// massimo, mai di più) la probabilità di "non fare nulla" e i cooldown tra
+// un micro-evento e l'altro: una volpe con legame più forte è un po' più
+// presente/vivace, senza alterare la personalità di base né riscrivere lo
+// scheduler — stessi pesi (INTENT_WEIGHTS), stesso principio, solo un
+// piccolo fattore moltiplicativo in più.
+export function useFoxAnimations(intent, hoursSinceLastFed = null, vitality = 0.5) {
   const [blink,     setBlink]     = useState(false);
   const [lookOffset,setLookOffset]= useState({ x: 0, y: 0 });
   const [headTilt,  setHeadTilt]  = useState(0);
@@ -87,6 +100,11 @@ export function useFoxAnimations(intent, hoursSinceLastFed = null) {
   const lastFired   = useRef({ look:0, tilt:0, tailFlick:0, earTwitch:0, hop:0, yawn:0, stretch:0 });
   const lastAnyBody = useRef(0); // ultimo evento "corpo" (esclude blink) per evitare stacking
   const eventTimers  = useRef([]);
+
+  // Fattore di modulazione: vitality=0.5 (neutro) → 1 (nessun cambiamento);
+  // vitality=1 → 0.9 (10% più vivace: meno "nulla", cooldown più corti);
+  // vitality=0 → 1.1 (10% più quieta). Clampato per garantire il limite ±10%.
+  const vitalityFactor = Math.max(0.9, Math.min(1.1, 1 - (vitality-0.5)*0.2));
  
   // ── Blink: indipendente dallo scheduler principale, leggero e non esclusivo ──
   // v1.4: durante "drowsy" il blink rallenta progressivamente in base a quante ore
@@ -125,7 +143,7 @@ export function useFoxAnimations(intent, hoursSinceLastFed = null) {
     const weights = INTENT_WEIGHTS[intent] || INTENT_WEIGHTS.idle;
     if (Object.values(weights).every(w => w === 0)) return; // sleepy: nessun evento
  
-    const nothingProb = NOTHING_PROB[intent] ?? 0.5;
+    const nothingProb = Math.max(0, Math.min(1, (NOTHING_PROB[intent] ?? 0.5) * vitalityFactor));
     let active = true;
     let tickTimer = null;
  
@@ -142,10 +160,10 @@ export function useFoxAnimations(intent, hoursSinceLastFed = null) {
       // mutua esclusione: non avviare un nuovo evento corpo se uno è appena partito
       if (now - lastAnyBody.current < GLOBAL_EVENT_GAP) { scheduleTick(); return; }
  
-      // candidati disponibili = peso > 0 E cooldown rispettato
+      // candidati disponibili = peso > 0 E cooldown rispettato (modulato ±10% da vitality)
       const available = {};
       for (const key of Object.keys(weights)) {
-        if (weights[key] > 0 && now - lastFired.current[key] >= COOLDOWNS[key]) {
+        if (weights[key] > 0 && now - lastFired.current[key] >= COOLDOWNS[key]*vitalityFactor) {
           available[key] = weights[key];
         }
       }
@@ -194,7 +212,7 @@ export function useFoxAnimations(intent, hoursSinceLastFed = null) {
  
     scheduleTick();
     return () => { active = false; if (tickTimer) clearTimeout(tickTimer); };
-  }, [intent]);
+  }, [intent, vitalityFactor]);
  
   // Reset pose quando si entra in sleepy, e cleanup generale allo smontaggio
   useEffect(() => {
