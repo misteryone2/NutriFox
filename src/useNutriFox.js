@@ -4,7 +4,7 @@ import { FOOD_DB, ALL_FOODS } from "./FoodDB";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
-// useNutriFox.js — v2.0
+// useNutriFox.js — v2.1
 //
 // Release di consolidamento tecnico: tutta la logica di business che prima
 // viveva dentro App.jsx (gestione pasti, idratazione, statistiche, dialoghi,
@@ -139,6 +139,44 @@ import { FOOD_DB, ALL_FOODS } from "./FoodDB";
 // test isolati su scenari sintetici di 90 giorni (esperienza, streak mai
 // raggiunta, milestone storiche, pause e ritorni) prima di essere collegato
 // all'hook.
+//
+// v2.1 — Evoluzione cognitiva della volpe (Behavior Engine + Learning Layer).
+// Ancora nessuna AI, ancora architettura a 7 file, ancora FoxSVG invariato.
+//
+//  - foxState si estende con 5 nuovi attributi: confidence (quanto la volpe
+//    è "sicura" di ciò che sa — volume di dati + trust + stabilità dei
+//    synthetic mood), motivation (la spinta osservata nell'utente: obiettivi,
+//    week-over-week, streak vs record), attachment (legame di lungo periodo:
+//    experience + relationship + milestone), adaptation (il Learning Layer:
+//    costanza + trust + idratazione + curiosity + risposta ai consigli —
+//    combinati, non un modello che si allena, solo dati che cambiano nel
+//    tempo), moodHistory (ultimi 7 stati SINTETICI dedotti da dailyLog, non
+//    un log reale — nessun nuovo store persistente).
+//  - Nuova computeBehaviorState(): traduce foxState+nutritionState in
+//    comportamento corrente (etichetta), iniziativa, frequenza consigli,
+//    intensità animazioni, propensione a incoraggiare/osservare. Meno
+//    interventi quando l'utente va bene (isDoingWell → observePropensity
+//    alta, initiative bassa), più supporto quando c'è un problema reale.
+//  - Message Engine: selectMessage/buildReactionCandidates accettano ora
+//    behaviorState. adviceFrequency scala il cooldown (±15%, "quando
+//    parlare"); applyBehaviorModulation (unica funzione condivisa dalle due
+//    superfici) pesa i candidati già esistenti in base al loro tono
+//    (MESSAGE_TONE: encouraging/direct) e a encouragePropensity/initiative
+//    ("quale tono") — nessuna nuova libreria di frasi.
+//  - FoxBrain/FoxAnimations: behaviorState modula LEGGERMENTE warmth/glow
+//    (nudge ±0.1 da animationIntensity), un pose lean minuscolo (±2px da
+//    currentBehavior), e — tramite lo stesso vitality già di v2.0, ora
+//    fuso con animationIntensity in un solo calcolo in Fox.jsx — anche la
+//    durata delle micro-animazioni in FoxAnimations, sempre nella stessa
+//    banda ±10%. Stage/streak/FoxSVG invariati.
+//  - Deduplicazione: la formula di warmth (relationship+trust)/200 era
+//    scritta sia in Fox.jsx sia dentro FoxBrain — ora vive una sola volta in
+//    FoxBrain (computeWarmth, esportata), usata da entrambi.
+// Verificato con test isolati (moodHistory, confidence/motivation/
+// attachment/adaptation su uno scenario di 60 giorni "virtuoso", e
+// computeBehaviorState su due scenari opposti: tutto ok → celebratory/
+// observing/iniziativa bassa; problema urgente → supportive/iniziativa
+// massima) prima di collegare tutto all'hook.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -882,6 +920,42 @@ function isFatigued(id, messageHistory, now) {
   return (entry.count||0) >= VARIETY_SUPPRESS_AFTER;
 }
 
+// ─── Modulazione da behaviorState (v2.1) ────────────────────────────────────
+// Il Behavior Engine (Fox Engine) non aggiunge nuove frasi: modula come viene
+// scelto TRA quelle già esistenti. Due leve, condivise da selectMessage e
+// buildReactionCandidates (un'unica fonte di verità, non due copie):
+//  - il tono di ogni id (MESSAGE_TONE) — "encouraging"/"direct"/"neutral" —
+//    una classificazione statica delle frasi già scritte, non un nuovo
+//    contenuto;
+//  - applyBehaviorModulation, che usa encouragePropensity/initiative di
+//    behaviorState per pesare più o meno un candidato in base al suo tono.
+const MESSAGE_TONE = {
+  // encouraging: rinforzo positivo, "sta andando bene"
+  amb_on_track:"encouraging", amb_water_done:"encouraging", amb_three_meals:"encouraging",
+  amb_weekly_memory:"encouraging", amb_mood_happy:"encouraging", amb_mood_excited:"encouraging",
+  ins_all_good:"encouraging", ins_progress_protein_up:"encouraging", ins_progress_ontarget_up:"encouraging",
+  ins_progress_logged_up:"encouraging", reaction_ontime:"encouraging", reaction_frequency:"encouraging",
+  // direct: segnala qualcosa da correggere/notare, tono più diretto
+  ins_missing_nutrient:"direct", ins_fat_heavy:"direct", ins_low_protein_balance:"direct",
+  ins_distribution:"direct", ins_weekly_habit_fat:"direct", ins_weekly_habit_protein:"direct",
+  amb_low_protein:"direct", amb_thirsty:"direct", amb_hydration_habit:"direct",
+};
+
+// Applica la modulazione di tono/frequenza a un elenco di candidati già
+// pesati (dopo la varietà) — stessa funzione per Message Engine e reazione al
+// pasto, mai due logiche separate per lo stesso concetto.
+function applyBehaviorModulation(candidates, behaviorState) {
+  if (!behaviorState) return candidates;
+  const { encouragePropensity=0.5, initiative=50 } = behaviorState;
+  return candidates.map(c => {
+    const tone = MESSAGE_TONE[c.id];
+    let factor = 1;
+    if (tone === "encouraging") factor *= 0.7 + encouragePropensity*0.6;   // 0.7–1.3
+    if (tone === "direct")      factor *= 0.85 + (initiative/100)*0.3;     // 0.85–1.15
+    return { ...c, weight: c.weight*factor };
+  });
+}
+
 function pickTopPriority(eligible) {
   if (eligible.length === 0) return null;
   const topPriority = Math.min(...eligible.map(c=>c.priority));
@@ -896,12 +970,18 @@ function pickTopPriority(eligible) {
   return topTier[topTier.length-1];
 }
  
-function selectMessage(library, ctx, messageHistory, now=Date.now()) {
+// v2.1: nuovo parametro opzionale `behaviorState` — "quando parlare" (il
+// cooldown effettivo si scala di ±15% con adviceFrequency: iniziativa alta
+// = parla più spesso, osservazione alta = parla meno), "quale tono" (pesi
+// modulati da applyBehaviorModulation). Nessuna nuova libreria di frasi:
+// solo la selezione tra quelle esistenti cambia.
+function selectMessage(library, ctx, messageHistory, now=Date.now(), behaviorState=null) {
+  const adviceFrequency = behaviorState?.adviceFrequency ?? 1;
   const eligible = library.filter(c => {
     if (!c.condition(ctx)) return false;
     if (c.cooldownMin>0) {
       const entry = normalizeHistoryEntry(messageHistory[c.id]);
-      if (entry && now-entry.last < c.cooldownMin*60000) return false;
+      if (entry && now-entry.last < c.cooldownMin*60000*adviceFrequency) return false;
     }
     return true;
   });
@@ -910,12 +990,12 @@ function selectMessage(library, ctx, messageHistory, now=Date.now()) {
   // insieme idoneo — la varietà non deve mai produrre un silenzio.
   const fresh = eligible.filter(c => !isFatigued(c.id, messageHistory, now));
   const pool = fresh.length ? fresh : eligible;
-  const candidates = pool.map(c => ({
+  const candidates = applyBehaviorModulation(pool.map(c => ({
     id:c.id, priority:c.priority,
     weight:(c.weight||1) * varietyFactor(c.id, messageHistory, now),
     emotion:c.emotion||null,
     text: typeof c.text==="function" ? c.text(ctx) : c.text,
-  }));
+  })), behaviorState);
   return pickTopPriority(candidates);
 }
 
@@ -987,8 +1067,11 @@ const INSIGHT_MESSAGES = [
     text: () => "Stai mantenendo un buon equilibrio nutrizionale, continua così!" },
 ];
 
-function pickNutritionHeadline(nutritionState, messageHistory) {
-  const picked = selectMessage(INSIGHT_MESSAGES, nutritionState, messageHistory);
+// v2.1: behaviorState passato attraverso a selectMessage — nessuna logica di
+// tono/frequenza duplicata qui, vive solo dentro selectMessage/
+// applyBehaviorModulation.
+function pickNutritionHeadline(nutritionState, messageHistory, behaviorState) {
+  const picked = selectMessage(INSIGHT_MESSAGES, nutritionState, messageHistory, Date.now(), behaviorState);
   const headlineTimeframe = INSIGHT_TIMEFRAMES[picked.id] || "today";
   return { headline: picked.text, headlineId: picked.id, headlineTimeframe };
 }
@@ -1026,24 +1109,28 @@ function ordinalIt(n) {
 // v1.9.1: legge esclusivamente da userMemory (già calcolata una volta
 // nell'hook), non riceve più dailyLog e non scansiona più nulla da sé —
 // stessa logica di prima, una sola fonte di verità per la memoria.
-function buildReactionCandidates({ reactionType, foodName, userMemory, mealType, waitedLong }) {
+// v2.1: behaviorState modula il peso — stesso helper di selectMessage
+// (applyBehaviorModulation), nessuna logica duplicata. I candidati guadagnano
+// un `id` leggero solo per la classificazione di tono (MESSAGE_TONE) — non è
+// una nuova frase, il testo resta quello già scelto da pickReaction.
+function buildReactionCandidates({ reactionType, foodName, userMemory, mealType, waitedLong, behaviorState }) {
   const candidates = [
-    { priority:5, text: pickReaction(reactionType, foodName) }, // presenza leggera, sempre disponibile
+    { id:"reaction_base", priority:5, text: pickReaction(reactionType, foodName) }, // presenza leggera, sempre disponibile
   ];
   if (waitedLong) {
-    candidates.push({ priority:1, text: pickReaction("relieved", foodName) }); // avviso importante: aspettava da ore
+    candidates.push({ id:"reaction_relieved", priority:1, text: pickReaction("relieved", foodName) }); // avviso importante: aspettava da ore
   }
   const memoryCount = userMemory?.foodCounts?.[foodName] || 0;
   if (memoryCount >= 3) {
-    candidates.push({ priority:3, text: `È ${ordinalIt(memoryCount)} ${foodName} questa settimana!` }); // riconoscimento
+    candidates.push({ id:"reaction_frequency", priority:3, text: `È ${ordinalIt(memoryCount)} ${foodName} questa settimana!` }); // riconoscimento
   }
   const routine = userMemory?.mealRoutines?.[mealType];
   if (routine) {
     const diff = Math.abs(new Date().getHours() - routine.avgHour);
-    if (diff <= 1) candidates.push({ priority:3, text: `Puntuale come sempre, ${mealType.toLowerCase()} verso le ${routine.avgHour}!` });
-    else if (diff >= 3) candidates.push({ priority:4, text: `Oggi ${mealType.toLowerCase()} un po' fuori dai tuoi orari soliti, va benissimo comunque!` });
+    if (diff <= 1) candidates.push({ id:"reaction_ontime", priority:3, text: `Puntuale come sempre, ${mealType.toLowerCase()} verso le ${routine.avgHour}!` });
+    else if (diff >= 3) candidates.push({ id:"reaction_offtime", priority:4, text: `Oggi ${mealType.toLowerCase()} un po' fuori dai tuoi orari soliti, va benissimo comunque!` });
   }
-  return pickTopPriority(candidates).text;
+  return pickTopPriority(applyBehaviorModulation(candidates, behaviorState)).text;
 }
 
 // Superficie "ambient": la didascalia sempre visibile sotto la volpe in home.
@@ -1271,6 +1358,139 @@ function computeRelationshipScore({ streak, lifetimeStats, weeklyGoals }) {
   return Math.round(streakScore*0.35 + consistencyScore*0.3 + goalsScore*0.25 + continuityScore*0.1);
 }
 
+// ─── Behavior Engine (v2.1) ─────────────────────────────────────────────────
+// Estende il Fox Engine con attributi che riguardano non "chi è" la volpe
+// (i tratti v2.0) ma "come si comporta adesso" — sempre derivati dagli stessi
+// dati già presenti, mai un nuovo store persistente.
+
+// moodHistory: non un log completo, solo gli ultimi `days` stati SINTETICI —
+// una stima retrospettiva di "come è andata quella giornata" dedotta dai dati
+// (calorie in target, numero di pasti), non il mood reale registrato in quel
+// momento (che non viene salvato per ogni giorno). Ricalcolata ogni volta da
+// dailyLog, mai un array che si aggiorna in incrementale.
+function computeMoodHistory(dailyLog, gKcal, days=7) {
+  return lastNDayKeys(days,1).map(k => {
+    const meals = dailyLog[k]?.meals || [];
+    if (!meals.length) return { date:k, syntheticMood:null };
+    const kcal = sumMacros(meals).kcal;
+    const onTarget = kcal>0 && kcal<=gKcal*1.15 && kcal>=gKcal*0.85;
+    let syntheticMood;
+    if (onTarget && meals.length>=3) syntheticMood = "content";
+    else if (meals.length>=2) syntheticMood = "neutral";
+    else syntheticMood = "sad";
+    return { date:k, syntheticMood };
+  }).reverse(); // ordine cronologico, più vecchio prima
+}
+
+// Quanto sono STABILI i synthetic mood recenti — meno oscillazioni tra stati
+// diversi significa che la volpe "legge" meglio l'andamento dell'utente.
+function computeMoodStability(moodHistory) {
+  const valid = moodHistory.filter(m=>m.syntheticMood);
+  if (valid.length < 3) return 50; // troppo pochi dati: punto di partenza neutro
+  const distinct = new Set(valid.map(m=>m.syntheticMood)).size;
+  return Math.max(0, 100 - (distinct-1)*25);
+}
+
+// ─── Confidence ─────────────────────────────────────────────────────────────
+// Quanto la volpe è "sicura" di ciò che sa sull'utente — non quanto l'utente
+// sta andando bene, ma quanti dati e quanto stabili sono i pattern osservati.
+// Combina volume di dati (giorni totali loggati), fiducia (prevedibilità
+// delle routine) e stabilità dei synthetic mood recenti.
+function computeConfidence({ lifetimeStats, trust, moodHistory }) {
+  const dataVolumeScore = Math.min(100, lifetimeStats.totalDaysLogged*2); // 50 giorni = pieno
+  const stabilityScore = computeMoodStability(moodHistory);
+  return Math.round(dataVolumeScore*0.4 + trust*0.35 + stabilityScore*0.25);
+}
+
+// ─── Motivation ──────────────────────────────────────────────────────────────
+// La "spinta" osservata nell'utente in questo momento — quanto la traiettoria
+// recente (obiettivi settimanali, confronto con la settimana scorsa, streak
+// rispetto al proprio record) sta andando nella direzione giusta.
+function computeMotivation({ weeklyGoals, weekOverWeek, streak, bestStreakEver }) {
+  const goalsScore = weeklyGoals?.length ? (weeklyGoals.filter(g=>g.done).length/weeklyGoals.length)*100 : 50;
+  const progressScore = weekOverWeek
+    ? (weekOverWeek.delta>0 ? 75 : weekOverWeek.delta<0 ? 35 : 50)
+    : 50;
+  const streakMomentum = bestStreakEver>0 ? Math.min(100,(streak/bestStreakEver)*100) : (streak>0?100:50);
+  return Math.round(goalsScore*0.4 + progressScore*0.35 + streakMomentum*0.25);
+}
+
+// ─── Attachment ──────────────────────────────────────────────────────────────
+// Legame di lungo periodo — a differenza di relationship (più reattivo alla
+// settimana recente), attachment pesa di più la storia cumulativa: quanto
+// tempo insieme (experience), quanti momenti speciali già condivisi
+// (memory.milestones), e il relationship score come componente più "live".
+function computeAttachment({ experience, relationship, memory }) {
+  const milestonesScore = Math.min(100, (memory?.milestones?.length||0)*30);
+  return Math.round(experience*0.4 + relationship*0.35 + milestonesScore*0.25);
+}
+
+// ─── Learning Layer (adaptation) ────────────────────────────────────────────
+// Non machine learning: un punteggio deterministico che combina 5 segnali
+// già derivati altrove — costanza (consistencyScore), risposta ai consigli
+// (adviceResponseScore, proxy dal confronto settimana-su-settimana: se le
+// metriche migliorano, l'utente sta "rispondendo" ai consigli passati),
+// regolarità dei pasti (trust, già basato sulle routine), idratazione
+// (hydration), varietà alimentare (curiosity). Più alto: più la volpe si è
+// "tarata" su questo utente specifico — non un modello che si allena, solo
+// una funzione pura di dati che cambiano nel tempo.
+function computeAdaptation({ lifetimeStats, trust, hydration, curiosity, weekOverWeek }) {
+  const consistencyScore = lifetimeStats.daysSinceFirstUse>0
+    ? Math.min(100, (lifetimeStats.totalDaysLogged/lifetimeStats.daysSinceFirstUse)*100)
+    : 0;
+  const hydrationScore = hydration ? Math.max(0, 100-hydration.lowDays*20) : 50;
+  const adviceResponseScore = weekOverWeek ? (weekOverWeek.delta>0 ? 70 : weekOverWeek.delta<0 ? 30 : 50) : 50;
+  const score = consistencyScore*0.3 + trust*0.25 + hydrationScore*0.15 + curiosity*0.15 + adviceResponseScore*0.15;
+  return Math.round(Math.max(0, Math.min(100, score)));
+}
+
+// ─── Punto di ingresso del Behavior Engine: computeBehaviorState ───────────
+// Non un ennesimo insieme di numeri: traduce gli attributi di foxState +
+// nutritionState in decisioni comportamentali concrete — quanto la volpe
+// prende iniziativa, quanto spesso parla, con che tono, quanto si anima.
+// Il Message Engine lo consulta ACCANTO a foxState (mai al posto di), per
+// decidere quando/quanto/come parlare — senza aggiungere nuove frasi, solo
+// modulando la selezione di quelle esistenti.
+function computeBehaviorState({ foxState, nutritionState, weeklyGoals }) {
+  const { motivation, attachment, adaptation } = foxState;
+  const goalsRate = weeklyGoals?.length ? weeklyGoals.filter(g=>g.done).length/weeklyGoals.length : 0.5;
+  const hasUrgentIssue = !!(nutritionState?.missingNutrient
+    || nutritionState?.mealBalance?.type==="fat_heavy"
+    || nutritionState?.mealBalance?.type==="low_protein");
+  const isDoingWell = goalsRate>=0.66 && !hasUrgentIssue;
+
+  // Comportamento corrente: un'etichetta sintetica, sempre la stessa a parità
+  // di input — utile a UI/AI future, non solo al motore messaggi.
+  let currentBehavior;
+  if (hasUrgentIssue)                       currentBehavior = "supportive";
+  else if (isDoingWell && motivation>=65)    currentBehavior = "celebratory";
+  else if (isDoingWell)                     currentBehavior = "observing";
+  else if (motivation<35)                   currentBehavior = "encouraging";
+  else                                       currentBehavior = "attentive";
+
+  // Iniziativa: più alta se c'è un problema da segnalare o se la volpe ha
+  // "energia sociale" (motivation/attachment alti); più bassa quando tutto va
+  // bene — meno interventi quando l'utente sta andando bene, come richiesto.
+  const initiative = Math.round(Math.max(0, Math.min(100,
+    40 + (hasUrgentIssue?30:0) + motivation*0.3 + attachment*0.2 + (isDoingWell?-20:10)
+  )));
+
+  // Frequenza consigli: moltiplicatore sul cooldown dei messaggi nel Message
+  // Engine — iniziativa alta = cooldown più corti (parla più spesso),
+  // iniziativa bassa = cooldown più lunghi (osserva di più). Variazione
+  // contenuta (±15%): è un tono, non uno stravolgimento della priorità.
+  const adviceFrequency = Math.max(0.85, Math.min(1.15, 1 - (initiative-50)/250));
+
+  // Intensità animazioni (0-1): una volpe più "in sintonia" (motivation +
+  // attachment + adaptation alti) è più espressiva nelle micro-animazioni.
+  const animationIntensity = Math.round(Math.max(0, Math.min(100, (motivation+attachment+adaptation)/3)))/100;
+
+  const observePropensity = Math.round(isDoingWell ? 70+goalsRate*20 : 30)/100;
+  const encouragePropensity = Math.round(motivation<50 ? 70 : (40+(hasUrgentIssue?20:0)))/100;
+
+  return { currentBehavior, initiative, adviceFrequency, animationIntensity, encouragePropensity, observePropensity };
+}
+
 // ─── Personalità (statica per ora) ─────────────────────────────────────────
 // Tratti di temperamento di base, non ancora derivati dal comportamento (a
 // differenza degli attributi dinamici sopra) — predisposizione per future
@@ -1320,7 +1540,7 @@ function computeFoxMemory({ dailyLog, weeklyGoals }) {
 // (dailyLog, streak, userMemory, customRecipes, vitals) — mai da uno store
 // separato che potrebbe disallinearsi, stesso principio già seguito da
 // getUserMemory. Deterministico, zero Math.random(), memoizzato nell'hook.
-function computeFoxState({ vitals, mood, streak, hoursSinceLastFed, dailyLog, userMemory, customRecipes, weeklyGoals }) {
+function computeFoxState({ vitals, mood, streak, hoursSinceLastFed, dailyLog, userMemory, customRecipes, weeklyGoals, gKcal, weekOverWeek }) {
   const lifetimeStats = computeLifetimeStats(dailyLog);
   const bestStreakEver = computeBestStreakEver(dailyLog);
   const distinctFoodsCount = userMemory?.foodMemory ? Object.keys(userMemory.foodMemory).length : 0;
@@ -1331,6 +1551,15 @@ function computeFoxState({ vitals, mood, streak, hoursSinceLastFed, dailyLog, us
   const relationship = computeRelationshipScore({ streak, lifetimeStats, weeklyGoals });
   const memory        = computeFoxMemory({ dailyLog, weeklyGoals });
 
+  // v2.1 — Behavior Engine: nuovi attributi derivati, sempre dagli stessi
+  // dati esistenti (dailyLog/userMemory/weeklyGoals/weekOverWeek), mai da un
+  // nuovo store persistente.
+  const moodHistory = computeMoodHistory(dailyLog, gKcal);
+  const confidence   = computeConfidence({ lifetimeStats, trust, moodHistory });
+  const motivation   = computeMotivation({ weeklyGoals, weekOverWeek, streak, bestStreakEver });
+  const attachment   = computeAttachment({ experience, relationship, memory });
+  const adaptation   = computeAdaptation({ lifetimeStats, trust, hydration:userMemory?.hydration, curiosity, weekOverWeek });
+
   return {
     emotion: { mood, hunger:vitals.hunger, happiness:vitals.happiness??70, health:vitals.health??90 },
     energy: vitals.energy,
@@ -1338,6 +1567,11 @@ function computeFoxState({ vitals, mood, streak, hoursSinceLastFed, dailyLog, us
     trust,
     experience,
     curiosity,
+    confidence,
+    motivation,
+    attachment,
+    adaptation,
+    moodHistory,
     personality: FOX_PERSONALITY,
     memory,
     behavior: { lastFedAt:vitals.lastFedAt, hoursSinceLastFed, streak, bestStreakEver },
@@ -1502,11 +1736,21 @@ export function useNutriFox() {
   }),[dailyLog, todayData.meals, totalP, totalC, totalF, gKcal, totalKcal, targets, water, targetWater, weeklyGoals]);
 
   // Fox Engine: un solo oggetto foxState con tutto lo stato della volpe
-  // (v2.0). Sempre ricalcolato da fxVitals + dati esistenti, mai da uno store
-  // a parte. Ogni altro modulo (UI, Message Engine) legge solo questo.
+  // (v2.0, esteso in v2.1 con confidence/motivation/attachment/adaptation/
+  // moodHistory). Sempre ricalcolato da fxVitals + dati esistenti, mai da uno
+  // store a parte. Ogni altro modulo (UI, Message Engine) legge solo questo.
   const foxState = useMemo(()=>computeFoxState({
     vitals:fxVitals, mood, streak, hoursSinceLastFed, dailyLog, userMemory, customRecipes, weeklyGoals,
-  }),[fxVitals, mood, streak, hoursSinceLastFed, dailyLog, userMemory, customRecipes, weeklyGoals]);
+    gKcal, weekOverWeek:nutritionState.weekOverWeek,
+  }),[fxVitals, mood, streak, hoursSinceLastFed, dailyLog, userMemory, customRecipes, weeklyGoals, gKcal, nutritionState.weekOverWeek]);
+
+  // Behavior Engine (v2.1): traduce foxState + nutritionState in decisioni
+  // comportamentali concrete (iniziativa, frequenza, tono, intensità). Il
+  // Message Engine lo consulta ACCANTO a foxState per decidere quando/quanto/
+  // come parlare — mai al posto degli stati strutturati già esistenti.
+  const behaviorState = useMemo(()=>computeBehaviorState({
+    foxState, nutritionState, weeklyGoals,
+  }),[foxState, nutritionState, weeklyGoals]);
  
   // Superficie "ambient" (didascalia in home): memoizzata sulle dipendenze
   // reali, non ricalcola ad ogni tick di decay se nulla di rilevante è
@@ -1515,10 +1759,11 @@ export function useNutriFox() {
   // messaggio si auto-invaliderebbe l'istante dopo essere apparso.
   // v2.0: non passa più `dailyLog` — legge solo userMemory (Memory Engine),
   // coerente con "il motore messaggi usa solo stati strutturati".
+  // v2.1: behaviorState passato a selectMessage per modulare tono/frequenza.
   const ambientResult = useMemo(()=>selectMessage(AMBIENT_MESSAGES, buildAmbientContext({
     hoursSinceLastFed, water, targetWater, totalP, mealsCount:todayData.meals.length,
     totalKcal, gKcal, mood, foxName, todayMeals:todayData.meals, userMemory,
-  }), messageHistory),[hoursSinceLastFed, water, targetWater, totalP, todayData.meals, totalKcal, gKcal, mood, foxName, messageHistory, userMemory]);
+  }), messageHistory, Date.now(), behaviorState),[hoursSinceLastFed, water, targetWater, totalP, todayData.meals, totalKcal, gKcal, mood, foxName, messageHistory, userMemory, behaviorState]);
   const contextualMessage = ambientResult.text;
   // v1.8: quale emozione mostrare sul volto mentre questo messaggio è attivo.
   // Una ricompensa in corso (streak/obiettivo/acqua) vince sempre — è il
@@ -1536,7 +1781,7 @@ export function useNutriFox() {
   // non calcola più nulla da sé. `insights` resta il nome esposto ad App.jsx
   // per compatibilità, ma ora è la fusione di nutritionState + la scelta del
   // Message Engine, invece di un'unica funzione che faceva entrambe le cose.
-  const headlinePick = useMemo(()=>pickNutritionHeadline(nutritionState, messageHistory),[nutritionState, messageHistory]);
+  const headlinePick = useMemo(()=>pickNutritionHeadline(nutritionState, messageHistory, behaviorState),[nutritionState, messageHistory, behaviorState]);
   const insights = { ...nutritionState, ...headlinePick };
   const prevInsightId = useRef(null);
   useEffect(()=>{
@@ -1673,7 +1918,7 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
     const waitedLong = hoursSinceLastFed != null && hoursSinceLastFed >= 5;
     const reactionType = waitedLong ? "relieved" : effect.reaction;
     const message = buildReactionCandidates({
-      reactionType, foodName:food.name, userMemory, mealType, waitedLong,
+      reactionType, foodName:food.name, userMemory, mealType, waitedLong, behaviorState,
     });
     setFxVitals(prev=>{
       const hunger    = Math.max(0,prev.hunger+effect.hungerDelta);
@@ -1729,6 +1974,10 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
     totalKcal, totalP, totalC, totalF, gKcal, targetWater, weekAvg,
     // profilo utente unificato e memoria comportamentale (v1.9)
     userProfile, userMemory,
+    // Behavior Engine (v2.1): decisioni comportamentali derivate da foxState
+    // + nutritionState — usato dal Message Engine, esposto anche per una
+    // eventuale UI futura (es. mostrare "la volpe sta osservando").
+    behaviorState,
     // Nutrition Engine (v2.0): insights = nutritionState + la scelta di
     // headline del Message Engine, fuse in un solo oggetto per compatibilità
     // con chi già consultava `insights`.
