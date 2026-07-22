@@ -22,6 +22,11 @@ import { useState, useEffect, useRef } from "react";
 // massimo. La personalità di base (INTENT_WEIGHTS, i pesi relativi tra i
 // vari eventi) resta invariata — nessuna riscrittura dello scheduler, solo
 // un piccolo fattore moltiplicativo applicato ai due punti che già esistevano.
+//
+// v2.1: lo stesso vitalityFactor (ora informato anche da behaviorState —
+// vedi Fox.jsx) modula anche la DURATA delle micro-animazioni (DURATIONS),
+// non solo probabilità e cooldown — sempre lo stesso fattore unico, mai una
+// seconda formula separata per lo stesso concetto di "vivacità".
 // ─────────────────────────────────────────────────────────────────────────────
  
 const TICK_MIN = 550, TICK_MAX = 950; // risoluzione dello scheduler, con jitter
@@ -178,32 +183,32 @@ export function useFoxAnimations(intent, hoursSinceLastFed = null, vitality = 0.
       if (chosen === "look") {
         const x = (Math.random()*5-2.5), y = (Math.random()*2-1);
         setLookOffset({ x, y });
-        const t = setTimeout(() => { if(active) setLookOffset({x:0,y:0}); }, jitter(DURATIONS.look));
+        const t = setTimeout(() => { if(active) setLookOffset({x:0,y:0}); }, jitter(DURATIONS.look*vitalityFactor));
         eventTimers.current.push(t);
       } else if (chosen === "tilt") {
         const tilt = Math.random()*6-3;
         setHeadTilt(tilt);
-        const t = setTimeout(() => { if(active) setHeadTilt(0); }, jitter(DURATIONS.tilt));
+        const t = setTimeout(() => { if(active) setHeadTilt(0); }, jitter(DURATIONS.tilt*vitalityFactor));
         eventTimers.current.push(t);
       } else if (chosen === "tailFlick") {
         setTailFlick(true);
-        const t = setTimeout(() => { if(active) setTailFlick(false); }, jitter(DURATIONS.tailFlick));
+        const t = setTimeout(() => { if(active) setTailFlick(false); }, jitter(DURATIONS.tailFlick*vitalityFactor));
         eventTimers.current.push(t);
       } else if (chosen === "earTwitch") {
         setEarTwitch(true);
-        const t = setTimeout(() => { if(active) setEarTwitch(false); }, jitter(DURATIONS.earTwitch));
+        const t = setTimeout(() => { if(active) setEarTwitch(false); }, jitter(DURATIONS.earTwitch*vitalityFactor));
         eventTimers.current.push(t);
       } else if (chosen === "hop") {
         setHop(true);
-        const t = setTimeout(() => { if(active) setHop(false); }, jitter(DURATIONS.hop));
+        const t = setTimeout(() => { if(active) setHop(false); }, jitter(DURATIONS.hop*vitalityFactor));
         eventTimers.current.push(t);
       } else if (chosen === "yawn") {
         setYawn(true);
-        const t = setTimeout(() => { if(active) setYawn(false); }, jitter(DURATIONS.yawn, 0.15));
+        const t = setTimeout(() => { if(active) setYawn(false); }, jitter(DURATIONS.yawn*vitalityFactor, 0.15));
         eventTimers.current.push(t);
       } else if (chosen === "stretch") {
         setStretch(true);
-        const t = setTimeout(() => { if(active) setStretch(false); }, jitter(DURATIONS.stretch, 0.15));
+        const t = setTimeout(() => { if(active) setStretch(false); }, jitter(DURATIONS.stretch*vitalityFactor, 0.15));
         eventTimers.current.push(t);
       }
  
