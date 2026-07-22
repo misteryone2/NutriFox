@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, memo } from "react";
-import { useFoxBrain, deriveVisualState, deriveStage } from "./FoxBrain";
+import { useFoxBrain, deriveVisualState, deriveStage, computeWarmth } from "./FoxBrain";
 import { useFoxAnimations, getAnimationIntent } from "./FoxAnimations";
 import FoxSVG from "./FoxSVG";
  
@@ -19,12 +19,19 @@ import FoxSVG from "./FoxSVG";
 // Fox Engine in useNutriFox.js): alimentano warmthScale/glowOpacity in
 // FoxBrain (postura/luminosità, MAI lo stage) e vitality in FoxAnimations
 // (±10% su frequenza dei micro-eventi) — passate attraverso, non ricalcolate.
+//
+// v2.1: nuova prop opzionale behaviorState (Behavior Engine, useNutriFox.js).
+// `vitality` (passata a FoxAnimations) ora nasce da UN SOLO calcolo che fonde
+// relationship/trust (v2.0) con behaviorState.animationIntensity (v2.1) —
+// non due formule separate. behaviorState viene anche passato a useFoxBrain
+// così com'è, che lo usa per un nudge leggero su warmth/glow/pose (mai su
+// stage/streak/FoxSVG).
 // ─────────────────────────────────────────────────────────────────────────────
  
 // Re-export per compatibilità con App.jsx (che importa getFoxStage)
 export { deriveStage as getFoxStage };
  
-function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFedAt = null, licking = false, specialEmotion = null, relationship = 50, trust = 50 }) {
+function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFedAt = null, licking = false, specialEmotion = null, relationship = 50, trust = 50, behaviorState = null }) {
  
   // 1. Pose + visualMood di base con la stessa funzione pura usata da useFoxBrain.
   //    v1.8: se il motore decisionale chiede un'emozione speciale (proud/curious)
@@ -40,14 +47,20 @@ function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFed
   const hoursBucket = hoursSinceLastFed != null ? Math.round(hoursSinceLastFed*4)/4 : null;
  
   // 2. Micro-animazioni idle: scheduler unico, valori boolean/numerici.
-  //    v2.0: vitality (0-1) = media di relationship/trust, modula lo
-  //    scheduler di ±10% al massimo (vedi FoxAnimations.js).
-  const vitality = Math.max(0, Math.min(1, (relationship + trust) / 200));
+  //    v2.0: vitality = media di relationship/trust. v2.1: si fonde con
+  //    behaviorState.animationIntensity — UN SOLO calcolo di vitalità, non
+  //    due formule separate che potrebbero disallinearsi.
+  const baseWarmth = computeWarmth(relationship, trust);
+  const vitality = behaviorState
+    ? Math.max(0, Math.min(1, baseWarmth*0.6 + behaviorState.animationIntensity*0.4))
+    : baseWarmth;
   const { blink, lookOffset, headTilt, tailFlick, earTwitch, hop, yawn, stretch } = useFoxAnimations(intent, hoursBucket, vitality);
  
   // 3. Tutte le derivazioni visive: un oggetto unico, nessuna logica inline qui.
   //    Il visualMood già risolto sopra viene passato così com'è, non ricalcolato.
-  const brain = useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood: visualMood, relationship, trust });
+  //    v2.1: behaviorState passato a useFoxBrain per modulare leggermente
+  //    pose/warmth/glow — mai stage/streak (invariati).
+  const brain = useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood: visualMood, relationship, trust, behaviorState });
  
   const { stage, poseTransform, bodyAnim, tailSpeed } = brain;
  
@@ -106,7 +119,7 @@ function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFed
         style={{
           width: size,
           height: size * 1.18 * stage.scale,
-          transform: `scale(${stage.scale * brain.warmthScale}) scaleY(${poseTransform.scaleY}) translateY(${poseTransform.offsetY}px)`,
+          transform: `scale(${stage.scale * brain.warmthScale}) scaleY(${poseTransform.scaleY}) translateY(${poseTransform.offsetY + brain.poseLeanY}px)`,
           transition: `transform ${poseTransform.transition}`,
           filter:`drop-shadow(0 10px 24px ${stage.color}50) drop-shadow(0 3px 8px #00000038)`,
         }}
