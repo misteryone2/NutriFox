@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// FoodDB.js — v1.9.7
+// FoodDB.js — v2.1
 //
 // Database alimenti e derivazione ALL_FOODS, estratti da useNutriFox.js dove
 // erano già isolati e pronti per questo passaggio fin dalla v1.4.1. Nessun
@@ -50,6 +50,15 @@
 // v1.9.7: +1 alimento (260 totali) — latte di mandorla. Questa versione ha
 // esteso solo useNutriFox.js (insight con distinzione temporale); FoodDB.js
 // non ha altri cambiamenti oltre al nuovo alimento.
+//
+// v2.0: corretto un duplicato introdotto per errore in v1.9.7 ("Latte di
+// mandorla" aggiunto due volte con valori diversi) — rimosso, aggiunta una
+// spremuta d'arancia al suo posto per mantenere il conteggio (260 totali).
+// Nota: esiste anche un duplicato PREESISTENTE dalla v1.8.2 ("Yogurt bianco",
+// presente in due categorie) non ancora corretto — fuori scope per le
+// versioni architetturali v2.0/v2.1, segnalato per una futura pulizia dati.
+//
+// v2.1: +1 alimento (261 totali) — acqua tonica.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const FOOD_DB = {
@@ -332,6 +341,7 @@ export const FOOD_DB = {
     { name:"Succo di mirtillo (200ml)", kcal:110, p:0.5, c:26, f:0, type:"carb", fibra:0.5, zuccheri:23.4, sale:0, gruppo:"Bevande", vegetariano:true, vegano:true, sazieta:"basso", pasti:["Colazione","Pranzo","Cena","Spuntino"] },
     { name:"Tisana ai frutti di bosco (250ml)", kcal:1, p:0, c:0.2, f:0, type:"light", fibra:0, zuccheri:0, sale:0, gruppo:"Bevande", vegetariano:true, vegano:true, sazieta:"basso", pasti:["Colazione","Pranzo","Cena","Spuntino"] },
     { name:"Spremuta d'arancia (200ml)", kcal:90, p:1.4, c:20, f:0.2, type:"carb", fibra:0.4, zuccheri:18, sale:0, gruppo:"Bevande", vegetariano:true, vegano:true, sazieta:"basso", pasti:["Colazione","Pranzo","Cena","Spuntino"] },
+    { name:"Acqua tonica (200ml)", kcal:70, p:0, c:18, f:0, type:"carb", fibra:0, zuccheri:18, sale:0, gruppo:"Bevande", vegetariano:true, vegano:true, sazieta:"basso", pasti:["Pranzo","Cena","Spuntino"] },
   ],
 };
 
