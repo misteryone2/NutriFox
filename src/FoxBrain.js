@@ -128,7 +128,15 @@ export function deriveVisualState({ mood, lastFedAt }) {
 // scala minuscolo, max +2%, una postura leggermente più "aperta") e
 // glowOpacity (una luminosità/aura sottile indipendente da quella leggendaria
 // di stage.aura, visibile anche prima della Leggendaria se il legame è forte).
-export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood, relationship=50, trust=50 }) {
+// Formula di "warmth" (0-1) da relationship/trust — un'unica fonte, usata sia
+// qui dentro (warmthScale/glowOpacity) sia da Fox.jsx (per comporre vitality
+// insieme a behaviorState.animationIntensity). Prima la stessa formula era
+// scritta due volte in due file diversi — v2.1 la consolida qui.
+export function computeWarmth(relationship=50, trust=50) {
+  return Math.max(0, Math.min(1, (relationship + trust) / 200));
+}
+
+export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood, relationship=50, trust=50, behaviorState=null }) {
   return useMemo(() => {
     const stage               = deriveStage(streak);
     const colors               = deriveColors(streak);
@@ -141,9 +149,22 @@ export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, ear
 
     // Warmth: media di relationship/trust, 0-1 — influenza SOLO elementi
     // visivi secondari, mai lo stage (che resta legato solo alla streak).
-    const warmth       = Math.max(0, Math.min(1, (relationship + trust) / 200));
-    const warmthScale  = 1 + warmth*0.02;                 // fino a +2%, mai più
-    const glowOpacity  = Math.round(warmth*0.3*100)/100;  // 0 → 0.3, sottile
+    // v2.1: behaviorState aggiunge un nudge LEGGERO (max ±0.1 su warmth) in
+    // base a animationIntensity — non sostituisce relationship/trust, li
+    // affina soltanto. computeWarmth è l'unica fonte della formula base.
+    const baseWarmth   = computeWarmth(relationship, trust);
+    const behaviorNudge = behaviorState ? (behaviorState.animationIntensity-0.5)*0.2 : 0;
+    const warmth        = Math.max(0, Math.min(1, baseWarmth + behaviorNudge));
+    const warmthScale   = 1 + warmth*0.02;                 // fino a +2%, mai più
+    const glowOpacity   = Math.round(warmth*0.3*100)/100;  // 0 → 0.3, sottile
+
+    // Pose lean: un nudge minuscolo (±2px) sulla traslazione verticale in
+    // base al comportamento corrente — "celebratory" un filo più eretta,
+    // "observing" un filo più raccolta. Mai un cambio di pose reale (quella
+    // resta governata solo da deriveVisualState/mood), solo un accento.
+    const poseLeanY = behaviorState?.currentBehavior === "celebratory" ? -2
+      : behaviorState?.currentBehavior === "observing" ? 1
+      : 0;
 
     // Le orecchie si abbassano in pose non-awake, reagiscono anche all'earTwitch
     const earAngle = pose !== "awake"
@@ -177,11 +198,13 @@ export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, ear
       poseTransform, bodyAnim, tailSpeed,
       // v2.0: influenza secondaria del legame (mai su FoxSVG direttamente —
       // Fox.jsx le applica al wrapper CSS, non allo stage/ai colori)
-      warmthScale, glowOpacity,
+      // v2.1: poseLeanY si aggiunge con lo stesso principio — un accento sul
+      // wrapper, mai un cambio di pose reale.
+      warmthScale, glowOpacity, poseLeanY,
       // metadati
       pose, visualMood, intent, hoursSinceLastFed,
     };
-  }, [mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood, relationship, trust]);
+  }, [mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood, relationship, trust, behaviorState]);
 }
  
  
