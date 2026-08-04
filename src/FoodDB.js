@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// FoodDB.js — v2.1
+// FoodDB.js — v2.2
 //
 // Database alimenti e derivazione ALL_FOODS, estratti da useNutriFox.js dove
 // erano già isolati e pronti per questo passaggio fin dalla v1.4.1. Nessun
@@ -59,6 +59,8 @@
 // versioni architetturali v2.0/v2.1, segnalato per una futura pulizia dati.
 //
 // v2.1: +1 alimento (261 totali) — acqua tonica.
+//
+// v2.2: +1 alimento (262 totali) — tè alla pesca.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const FOOD_DB = {
@@ -342,6 +344,7 @@ export const FOOD_DB = {
     { name:"Tisana ai frutti di bosco (250ml)", kcal:1, p:0, c:0.2, f:0, type:"light", fibra:0, zuccheri:0, sale:0, gruppo:"Bevande", vegetariano:true, vegano:true, sazieta:"basso", pasti:["Colazione","Pranzo","Cena","Spuntino"] },
     { name:"Spremuta d'arancia (200ml)", kcal:90, p:1.4, c:20, f:0.2, type:"carb", fibra:0.4, zuccheri:18, sale:0, gruppo:"Bevande", vegetariano:true, vegano:true, sazieta:"basso", pasti:["Colazione","Pranzo","Cena","Spuntino"] },
     { name:"Acqua tonica (200ml)", kcal:70, p:0, c:18, f:0, type:"carb", fibra:0, zuccheri:18, sale:0, gruppo:"Bevande", vegetariano:true, vegano:true, sazieta:"basso", pasti:["Pranzo","Cena","Spuntino"] },
+    { name:"Tè alla pesca (250ml)", kcal:80, p:0, c:20, f:0, type:"carb", fibra:0, zuccheri:19, sale:0, gruppo:"Bevande", vegetariano:true, vegano:true, sazieta:"basso", pasti:["Colazione","Pranzo","Cena","Spuntino"] },
   ],
 };
 
