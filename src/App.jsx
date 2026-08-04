@@ -37,6 +37,9 @@ import { FOOD_DB, ALL_FOODS } from "./FoodDB";
 // v2.1: behaviorState (Behavior Engine) passato a <Fox> insieme a
 // relationship/trust — nessun'altra modifica a questo file: la logica
 // comportamentale vive interamente in useNutriFox.js/Fox.jsx/FoxBrain.js.
+//
+// v2.2: decisionState (Decision Engine) passato a <Fox> — stessa logica,
+// nessun'altra modifica a questo file.
 // ─────────────────────────────────────────────────────────────────────────────
  
 // ─── PALETTE ──────────────────────────────────────────────────────────────────
@@ -75,7 +78,7 @@ export default function NutriFox() {
     setupDone, setSetupDone, foxName, setFoxName, goalKey, setGoalKey, profile, setProfile,
     dailyLog, favorites, customRecipes, water, setWater,
     aiMessages, aiInput, setAiInput, aiLoading, askFox, chatEndRef,
-    foxState, bounce, feedLabel, reaction, reward, licking, specialEmotion, behaviorState,
+    foxState, bounce, feedLabel, reaction, reward, licking, specialEmotion, behaviorState, decisionState,
     today, todayData, streak, stage, mood, contextualMessage,
     totalKcal, totalP, totalC, totalF, gKcal, targetWater, weekAvg,
     insights, suggestPortion, suggestMealFor, substituteMealIngredientFor,
@@ -609,7 +612,7 @@ export default function NutriFox() {
  
         {/* Fox + reaction popup + feed label */}
         <div style={{position:"relative",display:"inline-block"}}>
-          <Fox mood={mood} streak={streak} size={160} bounce={bounce} lastFedAt={foxState.behavior.lastFedAt} licking={licking} specialEmotion={specialEmotion} relationship={foxState.relationship} trust={foxState.trust} behaviorState={behaviorState}/>
+          <Fox mood={mood} streak={streak} size={160} bounce={bounce} lastFedAt={foxState.behavior.lastFedAt} licking={licking} specialEmotion={specialEmotion} relationship={foxState.relationship} trust={foxState.trust} behaviorState={behaviorState} decisionState={decisionState}/>
           {feedLabel&&(
             <div style={{position:"absolute",top:-10,left:"50%",transform:"translateX(-50%)",background:`linear-gradient(135deg,${C.accent},#E8553F)`,borderRadius:20,padding:"5px 14px",fontSize:13,fontWeight:700,color:"white",whiteSpace:"nowrap",animation:"floatUp 2s ease-out forwards",boxShadow:`0 4px 16px ${C.accent}55`}}>
               {feedLabel}
