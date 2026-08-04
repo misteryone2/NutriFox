@@ -26,12 +26,19 @@ import FoxSVG from "./FoxSVG";
 // non due formule separate. behaviorState viene anche passato a useFoxBrain
 // così com'è, che lo usa per un nudge leggero su warmth/glow/pose (mai su
 // stage/streak/FoxSVG).
+//
+// v2.2: nuova prop opzionale decisionState (Decision Engine). `vitality` si
+// arricchisce ancora — fonde relationship/trust + animationIntensity +
+// decisionState.urgency in UN SOLO numero, sempre nella stessa banda ±10%.
+// Nuovo: brain.gazeIntensity scala il lookOffset già calcolato da
+// FoxAnimations (Fox.jsx non ricalcola il movimento degli occhi, solo la sua
+// ampiezza) — decisionState passato anche a useFoxBrain per orecchie/postura.
 // ─────────────────────────────────────────────────────────────────────────────
  
 // Re-export per compatibilità con App.jsx (che importa getFoxStage)
 export { deriveStage as getFoxStage };
  
-function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFedAt = null, licking = false, specialEmotion = null, relationship = 50, trust = 50, behaviorState = null }) {
+function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFedAt = null, licking = false, specialEmotion = null, relationship = 50, trust = 50, behaviorState = null, decisionState = null }) {
  
   // 1. Pose + visualMood di base con la stessa funzione pura usata da useFoxBrain.
   //    v1.8: se il motore decisionale chiede un'emozione speciale (proud/curious)
@@ -48,21 +55,30 @@ function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFed
  
   // 2. Micro-animazioni idle: scheduler unico, valori boolean/numerici.
   //    v2.0: vitality = media di relationship/trust. v2.1: si fonde con
-  //    behaviorState.animationIntensity — UN SOLO calcolo di vitalità, non
-  //    due formule separate che potrebbero disallinearsi.
+  //    behaviorState.animationIntensity. v2.2: anche l'urgenza della
+  //    decisione corrente contribuisce — sempre UN SOLO calcolo di vitalità,
+  //    mai formule separate che potrebbero disallinearsi.
+  const URGENCY_WEIGHT = { high:1, medium:0.6, low:0.3, none:0 };
   const baseWarmth = computeWarmth(relationship, trust);
+  const urgencyBoost = decisionState ? (URGENCY_WEIGHT[decisionState.urgency] ?? 0) : 0;
   const vitality = behaviorState
-    ? Math.max(0, Math.min(1, baseWarmth*0.6 + behaviorState.animationIntensity*0.4))
+    ? Math.max(0, Math.min(1, baseWarmth*0.45 + behaviorState.animationIntensity*0.35 + urgencyBoost*0.20))
     : baseWarmth;
-  const { blink, lookOffset, headTilt, tailFlick, earTwitch, hop, yawn, stretch } = useFoxAnimations(intent, hoursBucket, vitality);
+  const { blink, lookOffset: rawLookOffset, headTilt, tailFlick, earTwitch, hop, yawn, stretch } = useFoxAnimations(intent, hoursBucket, vitality);
  
   // 3. Tutte le derivazioni visive: un oggetto unico, nessuna logica inline qui.
   //    Il visualMood già risolto sopra viene passato così com'è, non ricalcolato.
   //    v2.1: behaviorState passato a useFoxBrain per modulare leggermente
   //    pose/warmth/glow — mai stage/streak (invariati).
-  const brain = useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood: visualMood, relationship, trust, behaviorState });
+  //    v2.2: decisionState passato per modulare anche orecchie/sguardo/postura.
+  const brain = useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood: visualMood, relationship, trust, behaviorState, decisionState });
  
   const { stage, poseTransform, bodyAnim, tailSpeed } = brain;
+
+  // Sguardo: brain.gazeIntensity (0.85–1.15) scala l'ampiezza già calcolata
+  // da FoxAnimations — urgenza alta = sguardo un filo più diretto/fisso,
+  // mai una seconda sorgente per il movimento degli occhi in sé.
+  const lookOffset = { x: rawLookOffset.x*brain.gazeIntensity, y: rawLookOffset.y*brain.gazeIntensity };
  
   const showParticles = visualMood === "happy" || visualMood === "excited" || visualMood === "proud";
  
