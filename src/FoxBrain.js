@@ -23,6 +23,13 @@ import { getAnimationIntent } from "./FoxAnimations";
 // Fox Engine in useNutriFox.js): influenzano SOLO warmthScale/glowOpacity,
 // elementi visivi secondari — mai lo stage, che continua a rappresentare
 // solo la crescita legata alla streak, come richiesto esplicitamente.
+//
+// v2.2: nuovo parametro opzionale decisionState (Decision Engine). Un solo
+// urgencyLevel (0-1, derivato da decisionState.urgency) alimenta tre nudge
+// leggeri: poseLeanY (esteso), earAngle (±3°), e il nuovo gazeIntensity
+// (0.85–1.15, restituito ma applicato da Fox.jsx al lookOffset di
+// FoxAnimations — questo hook non possiede quello stato). Sempre nudge,
+// mai un cambio di stage/streak/FoxSVG.
 // ─────────────────────────────────────────────────────────────────────────────
  
 // Stage in base alla streak — rappresenta la CRESCITA della volpe. v2.0:
@@ -136,7 +143,7 @@ export function computeWarmth(relationship=50, trust=50) {
   return Math.max(0, Math.min(1, (relationship + trust) / 200));
 }
 
-export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood, relationship=50, trust=50, behaviorState=null }) {
+export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood, relationship=50, trust=50, behaviorState=null, decisionState=null }) {
   return useMemo(() => {
     const stage               = deriveStage(streak);
     const colors               = deriveColors(streak);
@@ -158,20 +165,42 @@ export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, ear
     const warmthScale   = 1 + warmth*0.02;                 // fino a +2%, mai più
     const glowOpacity   = Math.round(warmth*0.3*100)/100;  // 0 → 0.3, sottile
 
-    // Pose lean: un nudge minuscolo (±2px) sulla traslazione verticale in
-    // base al comportamento corrente — "celebratory" un filo più eretta,
-    // "observing" un filo più raccolta. Mai un cambio di pose reale (quella
-    // resta governata solo da deriveVisualState/mood), solo un accento.
-    const poseLeanY = behaviorState?.currentBehavior === "celebratory" ? -2
+    // v2.2 — Decision Engine: urgencyLevel (0-1) traduce decisionState.urgency
+    // in un unico numero, riusato per pose/orecchie/sguardo — un solo calcolo,
+    // non tre formule separate per lo stesso concetto di "quanto la volpe
+    // vuole farsi notare adesso".
+    const URGENCY_LEVEL = { high:1, medium:0.6, low:0.3, none:0 };
+    const urgencyLevel = decisionState ? (URGENCY_LEVEL[decisionState.urgency] ?? 0) : 0;
+
+    // Pose lean: un nudge minuscolo (±2px, esteso a ±3px con urgenza alta)
+    // sulla traslazione verticale in base al comportamento corrente —
+    // "celebratory" un filo più eretta, "observing" un filo più raccolta, e
+    // ora anche l'urgenza della decisione spinge leggermente in avanti (verso
+    // l'alto, valore negativo). Mai un cambio di pose reale, solo un accento.
+    const behaviorLean = behaviorState?.currentBehavior === "celebratory" ? -2
       : behaviorState?.currentBehavior === "observing" ? 1
       : 0;
+    const poseLeanY = Math.round(behaviorLean - urgencyLevel*1.5);
+
+    // Sguardo: un moltiplicatore (0.85–1.15, ±15% — leggero) sull'ampiezza
+    // del lookOffset già calcolato da FoxAnimations. Urgenza alta = sguardo
+    // più diretto/fisso (offset ridotto); nessuna urgenza = sguardo normale,
+    // libero di vagare come già faceva. Applicato da Fox.jsx, non qui: questo
+    // hook non possiede lo stato di lookOffset (vive in useFoxAnimations).
+    const gazeIntensity = Math.max(0.85, Math.min(1.15, 1 - urgencyLevel*0.15));
 
     // Le orecchie si abbassano in pose non-awake, reagiscono anche all'earTwitch
-    const earAngle = pose !== "awake"
+    // v2.2: urgenza alta le porta un filo più avanti/all'erta (±3°), coerente
+    // con "remind"/"teach" — mai più di così, resta un accento.
+    const urgencyEarNudge = Math.round(urgencyLevel*3);
+    const earAngleBase = pose !== "awake"
       ? { left: baseEarAngle.left + 10, right: baseEarAngle.right - 10 }
       : earTwitch
         ? { left: baseEarAngle.left + 8, right: baseEarAngle.right }
         : baseEarAngle;
+    const earAngle = urgencyEarNudge>0
+      ? { left: earAngleBase.left - urgencyEarNudge, right: earAngleBase.right + urgencyEarNudge }
+      : earAngleBase;
 
     // Animazione corpo — ora segue la pose reale, non solo il mood emotivo
     // v1.4: "stretch" (si stiracchia) ha priorità subito dopo bounce/hop
@@ -200,11 +229,11 @@ export function useFoxBrain({ mood, streak, lastFedAt, bounce, hop, stretch, ear
       // Fox.jsx le applica al wrapper CSS, non allo stage/ai colori)
       // v2.1: poseLeanY si aggiunge con lo stesso principio — un accento sul
       // wrapper, mai un cambio di pose reale.
-      warmthScale, glowOpacity, poseLeanY,
+      warmthScale, glowOpacity, poseLeanY, gazeIntensity,
       // metadati
       pose, visualMood, intent, hoursSinceLastFed,
     };
-  }, [mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood, relationship, trust, behaviorState]);
+  }, [mood, streak, lastFedAt, bounce, hop, stretch, earTwitch, resolvedVisualMood, relationship, trust, behaviorState, decisionState]);
 }
  
  
