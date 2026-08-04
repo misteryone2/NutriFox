@@ -4,7 +4,7 @@ import { FOOD_DB, ALL_FOODS } from "./FoodDB";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
-// useNutriFox.js — v2.1
+// useNutriFox.js — v2.2
 //
 // Release di consolidamento tecnico: tutta la logica di business che prima
 // viveva dentro App.jsx (gestione pasti, idratazione, statistiche, dialoghi,
@@ -177,6 +177,49 @@ import { FOOD_DB, ALL_FOODS } from "./FoodDB";
 // computeBehaviorState su due scenari opposti: tutto ok → celebratory/
 // observing/iniziativa bassa; problema urgente → supportive/iniziativa
 // massima) prima di collegare tutto all'hook.
+//
+// v2.2 — Decision Engine. Ancora nessuna AI, ancora architettura a 7 file,
+// ancora FoxSVG invariato.
+//
+//  - Nuovo computeDecisionState(): usa esclusivamente userProfile/userMemory/
+//    nutritionState/foxState/behaviorState/weeklyGoals (mai dailyLog).
+//    decisionState descrive cosa la volpe VUOLE FARE, non cosa dice:
+//    decision (observe/encourage/celebrate/remind/teach/staySilent),
+//    priority, reason, cooldown, duration, urgency.
+//  - Nuovo assessSituation(): hasUrgentIssue/isDoingWell erano calcolati solo
+//    dentro computeBehaviorState — ora è un'unica funzione condivisa da
+//    computeBehaviorState E computeDecisionState, non due implementazioni
+//    della stessa domanda.
+//  - Message Engine: nuovo DECISION_MESSAGE_MAP + filterByDecision — la
+//    libreria viene filtrata secondo decisionState.decision PRIMA di
+//    condition/cooldown/varietà/tono. Il Message Engine si limita a
+//    scegliere UN messaggio tra quelli già coerenti con la decisione, non
+//    rivaluta più da sé se mostrare qualcosa di urgente o celebrativo.
+//    Nessuna nuova frase: solo una classificazione statica degli id
+//    esistenti, come già MESSAGE_TONE.
+//  - moodHistory (v2.1) diventa Emotional Timeline (computeEmotionalTimeline)
+//    — stesso concetto, una sola scansione invece di due: etichette più
+//    ricche (positive/steady/difficult/improving/recovery/milestone/quiet),
+//    i milestone riusano le date già calcolate da computeFoxMemory. Nuovo
+//    moodContinuity (0-1) in foxState: FoxBrain lo userà per non cambiare
+//    intensità visiva troppo bruscamente da un giorno all'altro.
+//  - Nuovo relationshipLevel in foxState (Nuovo amico/Compagno/Fidato/Grande
+//    amico/Inseparabile, soglie fisse su relationship) — influenza solo
+//    tono/calore/presenza/animazioni, mai stage o streak.
+//  - FoxBrain: decisionState modula leggermente orecchie (±3°, da urgency),
+//    postura (poseLeanY esteso), e un nuovo gazeIntensity (±15%, applicato
+//    da Fox.jsx al lookOffset di FoxAnimations — FoxBrain non possiede quello
+//    stato, lo modula da fuori).
+//  - FoxAnimations: nessuna modifica diretta — `vitality` (calcolata una
+//    sola volta in Fox.jsx) ora fonde relationship/trust + animationIntensity
+//    + decisionState.urgency in un solo numero, sempre nella stessa banda
+//    ±10% già in vigore da v2.0. Un solo canale di modulazione, non due che
+//    si sommerebbero oltre il limite dichiarato.
+// Verificato con test isolati (decisionState su 3 scenari: tutto ok →
+// celebrate; problema urgente → remind/priority 2/urgency high; utente nuovo
+// senza dati → teach, mai un crash) e un bug reale trovato e corretto durante
+// i test (la condizione di "recovery" nella timeline scattava anche quando
+// il giorno dopo il vuoto aveva un solo pasto, non un vero ritorno).
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -956,6 +999,37 @@ function applyBehaviorModulation(candidates, behaviorState) {
   });
 }
 
+// ─── Decision Engine → Message Engine (v2.2) ───────────────────────────────
+// Il Decision Engine decide COSA la volpe vuole fare (remind/celebrate/
+// encourage/teach/observe/staySilent); il Message Engine si limita a
+// scegliere UN MESSAGGIO tra quelli già esistenti coerenti con quella
+// decisione — non decide più da sé se "c'è un problema" (quella valutazione
+// vive solo in assessSituation/computeDecisionState). Nessuna frase nuova:
+// solo una classificazione statica degli id già scritti, come MESSAGE_TONE.
+const DECISION_MESSAGE_MAP = {
+  remind:     ["ins_missing_nutrient","ins_fat_heavy","ins_low_protein_balance","ins_distribution",
+               "ins_weekly_habit_fat","ins_weekly_habit_protein","amb_low_protein","amb_thirsty",
+               "amb_hydration_habit","amb_long_wait"],
+  celebrate:  ["ins_all_good","ins_progress_protein_up","ins_progress_ontarget_up","ins_progress_logged_up",
+               "amb_on_track","amb_water_done","amb_three_meals","amb_weekly_memory","amb_mood_happy","amb_mood_excited"],
+  encourage:  ["ins_progress_protein_down","ins_trend_down","amb_mood_sad"],
+  teach:      ["amb_greeting","amb_routine_greeting","amb_lunch_routine","amb_dinner_routine"],
+  observe:    ["amb_default","amb_mood_content","ins_trend_up","ins_weekly_meal_pattern"],
+  staySilent: ["amb_default"],
+};
+
+// Filtra la libreria secondo la decisione corrente — ma se il filtro
+// svuotasse tutto (es. nessun messaggio di quella libreria è mappato su
+// quella decisione), si ripiega sulla libreria intera: la decisione guida la
+// scelta, non deve mai produrre un silenzio dove prima c'era un messaggio.
+function filterByDecision(library, decisionState) {
+  if (!decisionState) return library;
+  const allowed = DECISION_MESSAGE_MAP[decisionState.decision];
+  if (!allowed) return library;
+  const filtered = library.filter(c => allowed.includes(c.id));
+  return filtered.length ? filtered : library;
+}
+
 function pickTopPriority(eligible) {
   if (eligible.length === 0) return null;
   const topPriority = Math.min(...eligible.map(c=>c.priority));
@@ -975,9 +1049,16 @@ function pickTopPriority(eligible) {
 // = parla più spesso, osservazione alta = parla meno), "quale tono" (pesi
 // modulati da applyBehaviorModulation). Nessuna nuova libreria di frasi:
 // solo la selezione tra quelle esistenti cambia.
-function selectMessage(library, ctx, messageHistory, now=Date.now(), behaviorState=null) {
+// v2.2: nuovo parametro opzionale `decisionState` — applicato PRIMA di tutto
+// il resto (filterByDecision), così priorità/cooldown/varietà/tono agiscono
+// solo sul sottoinsieme di messaggi coerenti con la decisione del Decision
+// Engine. Il Message Engine "si limita a trasformare decisionState in
+// messaggi": non decide più da sé se mostrare qualcosa di urgente o
+// celebrativo, riceve già la decisione e sceglie solo IL messaggio.
+function selectMessage(library, ctx, messageHistory, now=Date.now(), behaviorState=null, decisionState=null) {
+  const decisionPool = filterByDecision(library, decisionState);
   const adviceFrequency = behaviorState?.adviceFrequency ?? 1;
-  const eligible = library.filter(c => {
+  const eligible = decisionPool.filter(c => {
     if (!c.condition(ctx)) return false;
     if (c.cooldownMin>0) {
       const entry = normalizeHistoryEntry(messageHistory[c.id]);
@@ -1070,8 +1151,8 @@ const INSIGHT_MESSAGES = [
 // v2.1: behaviorState passato attraverso a selectMessage — nessuna logica di
 // tono/frequenza duplicata qui, vive solo dentro selectMessage/
 // applyBehaviorModulation.
-function pickNutritionHeadline(nutritionState, messageHistory, behaviorState) {
-  const picked = selectMessage(INSIGHT_MESSAGES, nutritionState, messageHistory, Date.now(), behaviorState);
+function pickNutritionHeadline(nutritionState, messageHistory, behaviorState, decisionState) {
+  const picked = selectMessage(INSIGHT_MESSAGES, nutritionState, messageHistory, Date.now(), behaviorState, decisionState);
   const headlineTimeframe = INSIGHT_TIMEFRAMES[picked.id] || "today";
   return { headline: picked.text, headlineId: picked.id, headlineTimeframe };
 }
@@ -1363,43 +1444,69 @@ function computeRelationshipScore({ streak, lifetimeStats, weeklyGoals }) {
 // (i tratti v2.0) ma "come si comporta adesso" — sempre derivati dagli stessi
 // dati già presenti, mai un nuovo store persistente.
 
-// moodHistory: non un log completo, solo gli ultimi `days` stati SINTETICI —
-// una stima retrospettiva di "come è andata quella giornata" dedotta dai dati
-// (calorie in target, numero di pasti), non il mood reale registrato in quel
-// momento (che non viene salvato per ogni giorno). Ricalcolata ogni volta da
-// dailyLog, mai un array che si aggiorna in incrementale.
-function computeMoodHistory(dailyLog, gKcal, days=7) {
-  return lastNDayKeys(days,1).map(k => {
+// v2.2: moodHistory (v2.1) e l'Emotional Timeline richiesta ora erano lo
+// stesso concetto scritto due volte — un'unica scansione di dailyLog che
+// produce, per ciascuno degli ultimi `days` giorni, un'etichetta sintetica.
+// computeEmotionalTimeline la sostituisce e la arricchisce: non solo
+// positive/steady/difficult per il singolo giorno, ma anche transizioni
+// (improving, recovery) e traguardi (milestone, riusando le date già
+// calcolate da computeFoxMemory — nessuna nuova scansione per quello). Non
+// un log di eventi completi: solo un'etichetta per giorno.
+function computeEmotionalTimeline(dailyLog, gKcal, milestoneDates, days=7) {
+  const raw = lastNDayKeys(days,1).map(k => {
     const meals = dailyLog[k]?.meals || [];
-    if (!meals.length) return { date:k, syntheticMood:null };
+    if (!meals.length) return { date:k, base:"empty" };
     const kcal = sumMacros(meals).kcal;
     const onTarget = kcal>0 && kcal<=gKcal*1.15 && kcal>=gKcal*0.85;
-    let syntheticMood;
-    if (onTarget && meals.length>=3) syntheticMood = "content";
-    else if (meals.length>=2) syntheticMood = "neutral";
-    else syntheticMood = "sad";
-    return { date:k, syntheticMood };
+    const base = onTarget && meals.length>=3 ? "positive" : meals.length>=2 ? "steady" : "difficult";
+    return { date:k, base };
   }).reverse(); // ordine cronologico, più vecchio prima
+
+  const RANK = { empty:0, difficult:1, steady:2, positive:3 };
+  return raw.map((day, i) => {
+    if (milestoneDates?.has(day.date)) return { date:day.date, label:"milestone" };
+    if (day.base==="empty") return { date:day.date, label:"quiet" };
+    const prev = i>0 ? raw[i-1] : null;
+    if (prev && prev.base==="empty" && (day.base==="steady"||day.base==="positive")) return { date:day.date, label:"recovery" };
+    if (prev && RANK[day.base]>RANK[prev.base]) return { date:day.date, label:"improving" };
+    if (day.base==="difficult") return { date:day.date, label:"difficult" };
+    if (day.base==="positive") return { date:day.date, label:"positive" };
+    return { date:day.date, label:"steady" };
+  });
 }
 
-// Quanto sono STABILI i synthetic mood recenti — meno oscillazioni tra stati
-// diversi significa che la volpe "legge" meglio l'andamento dell'utente.
-function computeMoodStability(moodHistory) {
-  const valid = moodHistory.filter(m=>m.syntheticMood);
+// Quanto è STABILE la timeline recente — meno oscillazioni tra etichette
+// diverse significa che la volpe "legge" meglio l'andamento dell'utente, ed
+// è anche il segnale che FoxBrain usa per non cambiare troppo bruscamente
+// intensità visiva da un giorno all'altro (continuità emotiva).
+function computeMoodStability(emotionalTimeline) {
+  const valid = emotionalTimeline.filter(m=>m.label!=="quiet");
   if (valid.length < 3) return 50; // troppo pochi dati: punto di partenza neutro
-  const distinct = new Set(valid.map(m=>m.syntheticMood)).size;
-  return Math.max(0, 100 - (distinct-1)*25);
+  const distinct = new Set(valid.map(m=>m.label)).size;
+  return Math.max(0, 100 - (distinct-1)*20);
 }
 
 // ─── Confidence ─────────────────────────────────────────────────────────────
 // Quanto la volpe è "sicura" di ciò che sa sull'utente — non quanto l'utente
 // sta andando bene, ma quanti dati e quanto stabili sono i pattern osservati.
 // Combina volume di dati (giorni totali loggati), fiducia (prevedibilità
-// delle routine) e stabilità dei synthetic mood recenti.
-function computeConfidence({ lifetimeStats, trust, moodHistory }) {
+// delle routine) e stabilità della emotional timeline recente.
+function computeConfidence({ lifetimeStats, trust, emotionalTimeline }) {
   const dataVolumeScore = Math.min(100, lifetimeStats.totalDaysLogged*2); // 50 giorni = pieno
-  const stabilityScore = computeMoodStability(moodHistory);
+  const stabilityScore = computeMoodStability(emotionalTimeline);
   return Math.round(dataVolumeScore*0.4 + trust*0.35 + stabilityScore*0.25);
+}
+
+// ─── Livelli di relazione (v2.2) ────────────────────────────────────────────
+// Traduce relationship (0-100, numerico) in un'etichetta — influenza SOLO
+// tono, calore, presenza e animazioni (mai stage o streak, che restano
+// legati unicamente alla costanza di log). Soglie fisse, deterministiche.
+function deriveRelationshipLevel(relationship) {
+  if (relationship>=85) return "Inseparabile";
+  if (relationship>=65) return "Grande amico";
+  if (relationship>=45) return "Fidato";
+  if (relationship>=20) return "Compagno";
+  return "Nuovo amico";
 }
 
 // ─── Motivation ──────────────────────────────────────────────────────────────
@@ -1451,13 +1558,23 @@ function computeAdaptation({ lifetimeStats, trust, hydration, curiosity, weekOve
 // Il Message Engine lo consulta ACCANTO a foxState (mai al posto di), per
 // decidere quando/quanto/come parlare — senza aggiungere nuove frasi, solo
 // modulando la selezione di quelle esistenti.
-function computeBehaviorState({ foxState, nutritionState, weeklyGoals }) {
-  const { motivation, attachment, adaptation } = foxState;
+// ─── Valutazione condivisa della situazione (v2.2) ─────────────────────────
+// hasUrgentIssue/isDoingWell erano calcolati solo dentro computeBehaviorState;
+// il nuovo Decision Engine (più sotto) ha bisogno esattamente della stessa
+// valutazione. Un'unica funzione pura, chiamata da entrambi — non due
+// implementazioni della stessa domanda ("c'è un problema? va tutto bene?").
+function assessSituation(nutritionState, weeklyGoals) {
   const goalsRate = weeklyGoals?.length ? weeklyGoals.filter(g=>g.done).length/weeklyGoals.length : 0.5;
   const hasUrgentIssue = !!(nutritionState?.missingNutrient
     || nutritionState?.mealBalance?.type==="fat_heavy"
     || nutritionState?.mealBalance?.type==="low_protein");
   const isDoingWell = goalsRate>=0.66 && !hasUrgentIssue;
+  return { goalsRate, hasUrgentIssue, isDoingWell };
+}
+
+function computeBehaviorState({ foxState, nutritionState, weeklyGoals }) {
+  const { motivation, attachment, adaptation } = foxState;
+  const { goalsRate, hasUrgentIssue, isDoingWell } = assessSituation(nutritionState, weeklyGoals);
 
   // Comportamento corrente: un'etichetta sintetica, sempre la stessa a parità
   // di input — utile a UI/AI future, non solo al motore messaggi.
@@ -1489,6 +1606,68 @@ function computeBehaviorState({ foxState, nutritionState, weeklyGoals }) {
   const encouragePropensity = Math.round(motivation<50 ? 70 : (40+(hasUrgentIssue?20:0)))/100;
 
   return { currentBehavior, initiative, adviceFrequency, animationIntensity, encouragePropensity, observePropensity };
+}
+
+// ─── Decision Engine (v2.2) ─────────────────────────────────────────────────
+// Un livello nuovo tra "come si comporta in generale la volpe" (Behavior
+// Engine) e "cosa dice" (Message Engine): decisionState descrive cosa la
+// volpe VUOLE FARE adesso, non il testo. Usa esclusivamente stati già
+// strutturati — userProfile, userMemory, nutritionState, foxState,
+// behaviorState, weeklyGoals — mai dailyLog direttamente. Riusa
+// assessSituation (stessa valutazione già usata da computeBehaviorState,
+// non una seconda copia della stessa domanda).
+function computeDecisionState({ userProfile, userMemory, nutritionState, foxState, behaviorState, weeklyGoals }) {
+  const { hasUrgentIssue, isDoingWell } = assessSituation(nutritionState, weeklyGoals);
+  const { motivation, confidence, relationship } = foxState;
+  const { initiative, adviceFrequency } = behaviorState;
+
+  let decision, priority, reason, urgency;
+
+  if (hasUrgentIssue) {
+    decision = "remind";
+    priority = 2;
+    urgency = "high";
+    reason = nutritionState?.missingNutrient ? "missing_nutrient" : "meal_balance";
+  } else if (isDoingWell && motivation>=65 && relationship>=45) {
+    decision = "celebrate";
+    priority = 3;
+    urgency = "low";
+    reason = "doing_well";
+  } else if (isDoingWell) {
+    decision = "observe";
+    priority = 5;
+    urgency = "none";
+    reason = "stable_no_action_needed";
+  } else if (confidence<40 && (userMemory?.hydration || userProfile)) {
+    decision = "teach";
+    priority = 4;
+    urgency = "low";
+    reason = "low_confidence_still_learning";
+  } else if (motivation<35) {
+    decision = "encourage";
+    priority = 3;
+    urgency = "medium";
+    reason = "low_motivation";
+  } else if (initiative<30) {
+    decision = "staySilent";
+    priority = 6;
+    urgency = "none";
+    reason = "low_initiative";
+  } else {
+    decision = "observe";
+    priority = 5;
+    urgency = "none";
+    reason = "default_attentive";
+  }
+
+  // Cooldown/duration per decisione — base fissa, scalata dalla stessa
+  // adviceFrequency del Behavior Engine (non una seconda formula scollegata).
+  const BASE_COOLDOWN_MIN = { remind:0, encourage:180, celebrate:360, teach:240, observe:480, staySilent:600 };
+  const BASE_DURATION_MS  = { remind:8000, encourage:6000, celebrate:7000, teach:9000, observe:5000, staySilent:0 };
+  const cooldown = Math.round((BASE_COOLDOWN_MIN[decision] ?? 240) * adviceFrequency);
+  const duration = BASE_DURATION_MS[decision] ?? 6000;
+
+  return { decision, priority, reason, cooldown, duration, urgency };
 }
 
 // ─── Personalità (statica per ora) ─────────────────────────────────────────
@@ -1554,16 +1733,22 @@ function computeFoxState({ vitals, mood, streak, hoursSinceLastFed, dailyLog, us
   // v2.1 — Behavior Engine: nuovi attributi derivati, sempre dagli stessi
   // dati esistenti (dailyLog/userMemory/weeklyGoals/weekOverWeek), mai da un
   // nuovo store persistente.
-  const moodHistory = computeMoodHistory(dailyLog, gKcal);
-  const confidence   = computeConfidence({ lifetimeStats, trust, moodHistory });
+  // v2.2: moodHistory diventa emotionalTimeline (arricchita, unica fonte —
+  // vedi commento su computeEmotionalTimeline). Riusa le date dei milestone
+  // già calcolate da computeFoxMemory, nessuna scansione aggiuntiva.
+  const milestoneDates = new Set((memory.milestones||[]).map(m=>m.date));
+  const emotionalTimeline = computeEmotionalTimeline(dailyLog, gKcal, milestoneDates);
+  const confidence   = computeConfidence({ lifetimeStats, trust, emotionalTimeline });
   const motivation   = computeMotivation({ weeklyGoals, weekOverWeek, streak, bestStreakEver });
   const attachment   = computeAttachment({ experience, relationship, memory });
   const adaptation   = computeAdaptation({ lifetimeStats, trust, hydration:userMemory?.hydration, curiosity, weekOverWeek });
+  const moodContinuity = computeMoodStability(emotionalTimeline)/100; // 0-1, riusata da FoxBrain per la continuità visiva
 
   return {
     emotion: { mood, hunger:vitals.hunger, happiness:vitals.happiness??70, health:vitals.health??90 },
     energy: vitals.energy,
     relationship,
+    relationshipLevel: deriveRelationshipLevel(relationship),
     trust,
     experience,
     curiosity,
@@ -1571,7 +1756,8 @@ function computeFoxState({ vitals, mood, streak, hoursSinceLastFed, dailyLog, us
     motivation,
     attachment,
     adaptation,
-    moodHistory,
+    emotionalTimeline,
+    moodContinuity,
     personality: FOX_PERSONALITY,
     memory,
     behavior: { lastFedAt:vitals.lastFedAt, hoursSinceLastFed, streak, bestStreakEver },
@@ -1751,6 +1937,13 @@ export function useNutriFox() {
   const behaviorState = useMemo(()=>computeBehaviorState({
     foxState, nutritionState, weeklyGoals,
   }),[foxState, nutritionState, weeklyGoals]);
+
+  // Decision Engine (v2.2): cosa la volpe VUOLE FARE adesso — usa solo stati
+  // già strutturati (mai dailyLog). Il Message Engine, più sotto, si limita
+  // a tradurre questa decisione in un messaggio tra quelli già esistenti.
+  const decisionState = useMemo(()=>computeDecisionState({
+    userProfile, userMemory, nutritionState, foxState, behaviorState, weeklyGoals,
+  }),[userProfile, userMemory, nutritionState, foxState, behaviorState, weeklyGoals]);
  
   // Superficie "ambient" (didascalia in home): memoizzata sulle dipendenze
   // reali, non ricalcola ad ogni tick di decay se nulla di rilevante è
@@ -1760,10 +1953,12 @@ export function useNutriFox() {
   // v2.0: non passa più `dailyLog` — legge solo userMemory (Memory Engine),
   // coerente con "il motore messaggi usa solo stati strutturati".
   // v2.1: behaviorState passato a selectMessage per modulare tono/frequenza.
+  // v2.2: decisionState passato per primo — filtra la libreria coerentemente
+  // con cosa la volpe ha deciso di fare, prima di priorità/varietà/tono.
   const ambientResult = useMemo(()=>selectMessage(AMBIENT_MESSAGES, buildAmbientContext({
     hoursSinceLastFed, water, targetWater, totalP, mealsCount:todayData.meals.length,
     totalKcal, gKcal, mood, foxName, todayMeals:todayData.meals, userMemory,
-  }), messageHistory, Date.now(), behaviorState),[hoursSinceLastFed, water, targetWater, totalP, todayData.meals, totalKcal, gKcal, mood, foxName, messageHistory, userMemory, behaviorState]);
+  }), messageHistory, Date.now(), behaviorState, decisionState),[hoursSinceLastFed, water, targetWater, totalP, todayData.meals, totalKcal, gKcal, mood, foxName, messageHistory, userMemory, behaviorState, decisionState]);
   const contextualMessage = ambientResult.text;
   // v1.8: quale emozione mostrare sul volto mentre questo messaggio è attivo.
   // Una ricompensa in corso (streak/obiettivo/acqua) vince sempre — è il
@@ -1781,7 +1976,7 @@ export function useNutriFox() {
   // non calcola più nulla da sé. `insights` resta il nome esposto ad App.jsx
   // per compatibilità, ma ora è la fusione di nutritionState + la scelta del
   // Message Engine, invece di un'unica funzione che faceva entrambe le cose.
-  const headlinePick = useMemo(()=>pickNutritionHeadline(nutritionState, messageHistory, behaviorState),[nutritionState, messageHistory, behaviorState]);
+  const headlinePick = useMemo(()=>pickNutritionHeadline(nutritionState, messageHistory, behaviorState, decisionState),[nutritionState, messageHistory, behaviorState, decisionState]);
   const insights = { ...nutritionState, ...headlinePick };
   const prevInsightId = useRef(null);
   useEffect(()=>{
@@ -1978,6 +2173,9 @@ Rispondi alla domanda dell'utente tenendo conto di questi dati reali. Se non hai
     // + nutritionState — usato dal Message Engine, esposto anche per una
     // eventuale UI futura (es. mostrare "la volpe sta osservando").
     behaviorState,
+    // Decision Engine (v2.2): cosa la volpe vuole fare adesso (non cosa
+    // dice) — usato dal Message Engine e da FoxBrain/FoxAnimations.
+    decisionState,
     // Nutrition Engine (v2.0): insights = nutritionState + la scelta di
     // headline del Message Engine, fuse in un solo oggetto per compatibilità
     // con chi già consultava `insights`.
