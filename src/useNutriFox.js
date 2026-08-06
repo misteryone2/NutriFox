@@ -4,7 +4,7 @@ import { FOOD_DB, ALL_FOODS } from "./FoodDB";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
-// useNutriFox.js — v2.2
+// useNutriFox.js — v2.2.1
 //
 // Release di consolidamento tecnico: tutta la logica di business che prima
 // viveva dentro App.jsx (gestione pasti, idratazione, statistiche, dialoghi,
@@ -220,6 +220,24 @@ import { FOOD_DB, ALL_FOODS } from "./FoodDB";
 // senza dati → teach, mai un crash) e un bug reale trovato e corretto durante
 // i test (la condizione di "recovery" nella timeline scattava anche quando
 // il giorno dopo il vuoto aveva un solo pasto, non un vero ritorno).
+//
+// v2.2.1 — BUGFIX CRITICO, trovato montando davvero l'app in React/JSDOM (non
+// solo verifica statica) dopo una richiesta esplicita di controllo. selectMessage
+// poteva restituire null: filterByDecision garantiva un insieme di ID non
+// vuoto, ma nessuno garantiva che le loro condition(ctx) fossero vere ADESSO
+// — es. decisione "teach" con solo id di routine (colazione/pranzo/cena) le
+// cui condizioni orarie non erano soddisfatte in quel momento produceva
+// eligible=[], quindi pickTopPriority(candidates)===null, quindi
+// ambientResult.text lanciava "Cannot read properties of null" al primo
+// render. RIPRODOTTO e CONFERMATO: un utente nuovo al primo avvio (dati
+// vuoti) mandava in crash l'intera app (schermo bianco) — il caso più comune
+// in assoluto. Corretto in due punti: (1) se il filtro-decisione svuota gli
+// idonei ORA, si ripiega sulla libreria intera, che ha sempre almeno una
+// voce con condition:()=>true (amb_default/ins_all_good); (2) rete di
+// sicurezza finale — selectMessage/buildReactionCandidates non restituiscono
+// più null a un chiamante, mai. Verificato montando davvero l'app (React 18
+// + JSDOM, non solo esbuild) prima/dopo la correzione, con lo stesso
+// scenario esatto: prima → crash, root vuoto; dopo → 0 errori, DOM reale.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1058,7 +1076,7 @@ function pickTopPriority(eligible) {
 function selectMessage(library, ctx, messageHistory, now=Date.now(), behaviorState=null, decisionState=null) {
   const decisionPool = filterByDecision(library, decisionState);
   const adviceFrequency = behaviorState?.adviceFrequency ?? 1;
-  const eligible = decisionPool.filter(c => {
+  const checkEligible = pool => pool.filter(c => {
     if (!c.condition(ctx)) return false;
     if (c.cooldownMin>0) {
       const entry = normalizeHistoryEntry(messageHistory[c.id]);
@@ -1066,6 +1084,18 @@ function selectMessage(library, ctx, messageHistory, now=Date.now(), behaviorSta
     }
     return true;
   });
+  let eligible = checkEligible(decisionPool);
+  // BUG REALE trovato e corretto (v2.2.1): filterByDecision garantiva un
+  // insieme di ID non vuoto, ma nulla garantiva che le loro condition(ctx)
+  // fossero vere ADESSO — es. decisione "teach" con solo id di routine
+  // (colazione/pranzo/cena) le cui condizioni orarie non erano soddisfatte
+  // in quel momento produceva eligible=[] e quindi un ambientResult NULL,
+  // con crash al primo .text letto dal chiamante. Se la decisione filtra via
+  // tutto ciò che è idoneo ORA, si ripiega sulla libreria intera (che ha
+  // sempre almeno una voce con condition:()=>true, es. amb_default/
+  // ins_all_good) — la decisione guida la scelta, non deve mai produrre un
+  // silenzio dove prima c'era un messaggio.
+  if (!eligible.length && decisionPool !== library) eligible = checkEligible(library);
   // "Freschi": idonei e non affaticati da troppe ripetizioni ravvicinate. Se
   // rimane qualcosa, si sceglie solo da lì; altrimenti si ripiega sull'intero
   // insieme idoneo — la varietà non deve mai produrre un silenzio.
@@ -1077,7 +1107,10 @@ function selectMessage(library, ctx, messageHistory, now=Date.now(), behaviorSta
     emotion:c.emotion||null,
     text: typeof c.text==="function" ? c.text(ctx) : c.text,
   })), behaviorState);
-  return pickTopPriority(candidates);
+  // Rete di sicurezza finale: con la libreria intera come ultimo ripiego,
+  // questo non dovrebbe più accadere — ma nessuna funzione di questo motore
+  // deve MAI restituire null a un chiamante che legge .text senza controllo.
+  return pickTopPriority(candidates) || { id:null, priority:9, emotion:null, text:"" };
 }
 
 // ─── Headline del coach (sceglie da nutritionState) ────────────────────────
@@ -1211,7 +1244,11 @@ function buildReactionCandidates({ reactionType, foodName, userMemory, mealType,
     if (diff <= 1) candidates.push({ id:"reaction_ontime", priority:3, text: `Puntuale come sempre, ${mealType.toLowerCase()} verso le ${routine.avgHour}!` });
     else if (diff >= 3) candidates.push({ id:"reaction_offtime", priority:4, text: `Oggi ${mealType.toLowerCase()} un po' fuori dai tuoi orari soliti, va benissimo comunque!` });
   }
-  return pickTopPriority(applyBehaviorModulation(candidates, behaviorState)).text;
+  // candidates ha sempre almeno "reaction_base" (mai un array vuoto per
+  // costruzione), ma il fallback ?. resta comunque come rete di sicurezza —
+  // nessuna funzione di questo motore deve dipendere silenziosamente da
+  // un invariante che un edit futuro potrebbe rompere.
+  return pickTopPriority(applyBehaviorModulation(candidates, behaviorState))?.text || "";
 }
 
 // Superficie "ambient": la didascalia sempre visibile sotto la volpe in home.
