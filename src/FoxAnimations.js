@@ -27,6 +27,14 @@ import { useState, useEffect, useRef } from "react";
 // vedi Fox.jsx) modula anche la DURATA delle micro-animazioni (DURATIONS),
 // non solo probabilità e cooldown — sempre lo stesso fattore unico, mai una
 // seconda formula separata per lo stesso concetto di "vivacità".
+//
+// v2.2.2 — restyling grafico: NESSUNA modifica di logica in questo file,
+// per scelta deliberata. "Aggiungi inerzia, piccoli ritardi nei movimenti"
+// per orecchie/coda è stato ottenuto con CSS transition/animation a
+// "overshoot" (cubic-bezier con valore >1) in FoxSVG.jsx/Fox.jsx — lo
+// stesso booleano earTwitch/tailFlick calcolato qui arriva a destinazione
+// con un piccolo rimbalzo fisico invece di scattare, senza aggiungere un
+// secondo stato o un secondo timer. Scheduler invariato, come richiesto.
 // ─────────────────────────────────────────────────────────────────────────────
  
 const TICK_MIN = 550, TICK_MAX = 950; // risoluzione dello scheduler, con jitter
