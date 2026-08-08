@@ -97,13 +97,33 @@ function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFed
   return (
     <div role="img" aria-label={`Volpe, stato: ${moodDescriptions[brain.visualMood] || "tranquilla"}`} style={{ position:"relative", display:"inline-block", lineHeight:0 }}>
  
-      {/* Aura leggendaria (solo stage, invariata) */}
+      {/* Aura leggendaria — v2.2.2: bagliore più morbido su due strati (un
+          alone esterno ampio e lento sotto quello originale, opacità
+          massima ridotta) più 3 minuscole particelle che fluttuano
+          lentamente — un effetto più elegante, non invasivo. Trigger
+          invariato: solo stage.aura, che dipende solo dalla streak. */}
       {stage.aura && (
-        <div style={{
-          position:"absolute", inset:-22, borderRadius:"50%",
-          background:"radial-gradient(circle,#F9C74F40 0%,#F9C74F12 55%,transparent 70%)",
-          animation:"aura 2.4s ease-in-out infinite", pointerEvents:"none",
-        }}/>
+        <>
+          <div style={{
+            position:"absolute", inset:-30, borderRadius:"50%",
+            background:"radial-gradient(circle,#F9C74F22 0%,#F9C74F0A 60%,transparent 75%)",
+            animation:"auraOuter 4.8s ease-in-out infinite", pointerEvents:"none",
+          }}/>
+          <div style={{
+            position:"absolute", inset:-22, borderRadius:"50%",
+            background:"radial-gradient(circle,#F9C74F38 0%,#F9C74F12 55%,transparent 70%)",
+            animation:"aura 2.8s ease-in-out infinite", pointerEvents:"none",
+          }}/>
+          {[{t:-16,l:-8,delay:0},{t:8,l:-22,delay:1.6},{t:-6,l:20,delay:3.1}].map((s,i)=>(
+            <div key={"auraSpark"+i} style={{
+              position:"absolute", top:`${50+s.t}%`, left:`${50+s.l}%`,
+              width:3, height:3, borderRadius:"50%", background:"#FFE8B0",
+              boxShadow:"0 0 4px 1px #F9C74F80",
+              animation:`auraSparkle 5.5s ease-in-out ${s.delay}s infinite`,
+              pointerEvents:"none",
+            }}/>
+          ))}
+        </>
       )}
 
       {/* v2.0: luminosità secondaria legata al legame (relationship/trust) —
@@ -153,6 +173,7 @@ function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFed
           tailSpeed={tailSpeed}
           yawning={yawn}
           licking={licking}
+          bodyAnim={bodyAnim}
         />
       </div>
  
@@ -170,6 +191,30 @@ function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFed
         .fox-torso-group { animation: torsoBreathe 3.6s ease-in-out infinite; }
         .fox-head-group  { transition: transform 0.5s cubic-bezier(.34,1.4,.64,1); }
         .fox-tongue      { transform-origin: 49px 66px; animation: foxLick 0.9s ease-in-out 2; }
+
+        /* v2.2.2 — restyling grafico. Nessuna nuova logica: solo CSS/SVG.
+           - fox-hip-group: leggerissima oscillazione dei fianchi, sfasata
+             (delay) rispetto al respiro del busto (torsoBreathe) — il corpo
+             non si muove più tutto "in blocco" allo stesso ritmo.
+           - fox-tail-group: prima aveva SOLO animationDuration inline ma
+             nessuna keyframe/animation-name assegnata — la coda non si
+             muoveva mai di suo, solo per trascinamento. Ora ha una vera
+             oscillazione propria (tailSway).
+           - fox-ear: transition con leggero "overshoot" (cubic-bezier con
+             valore >1) — lo stesso angolo calcolato da FoxBrain (invariato)
+             arriva a destinazione con un piccolo rimbalzo fisico, invece di
+             scattare istantaneamente. È così che nasce l'inerzia, senza
+             toccare FoxBrain/FoxAnimations.
+           - fox-shadow / fox-shadow-bounce: l'ombra a terra pulsa col
+             respiro e si stringe/allarga in coerenza con salti e rimbalzi.
+           - fox-cheek-pulse: le guance sollevate (happy/excited) respirano
+             leggermente invece di restare un'ellisse statica. */
+        .fox-hip-group  { animation: hipSway 3.6s ease-in-out infinite; animation-delay: 0.35s; }
+        .fox-tail-group { animation-name: tailSway; animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
+        .fox-ear        { transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        .fox-shadow     { animation: shadowBreathe 3.8s ease-in-out infinite; }
+        .fox-shadow-bounce { animation: shadowBounce 0.55s cubic-bezier(.36,.07,.19,.97) both; }
+        .fox-cheek-pulse   { animation: cheekPulse 2.6s ease-in-out infinite; }
  
         @keyframes foxIdle    { 0%,100%{ transform:translateY(0); }       50%{ transform:translateY(-5px); } }
         @keyframes foxBounce  { 0%{transform:scale(1) translateY(0);} 20%{transform:scale(1.08,.93) translateY(5px);} 45%{transform:scale(.94,1.06) translateY(-13px);} 65%{transform:scale(1.04,.97) translateY(3px);} 82%{transform:scale(.98,1.02) translateY(-4px);} 100%{transform:scale(1) translateY(0);} }
@@ -181,19 +226,35 @@ function Fox({ mood = "neutral", streak = 0, size = 160, bounce = false, lastFed
         @keyframes foxLick    { 0%,100%{ transform:translateY(0) scaleY(1); } 50%{ transform:translateY(3px) scaleY(1.3); } }
         @keyframes foxSad     { 0%,100%{ transform:translateY(0) rotate(0deg); }  50%{ transform:translateY(5px) rotate(-1deg); } }
         @keyframes foxExcited { 0%,100%{ transform:translateY(0) scale(1); }      30%{ transform:translateY(-7px) scale(1.03); } 70%{ transform:translateY(-3px) scale(1.01); } }
-        @keyframes torsoBreathe { 0%,100%{ transform:scaleY(1); } 50%{ transform:scaleY(1.015); } }
-        @keyframes aura       { 0%,100%{ opacity:.5; transform:scale(1); } 50%{ opacity:1; transform:scale(1.06); } }
+        /* Respiro del busto: v2.2.2 aggiunge un accenno di rotate (±0.3deg)
+           insieme allo scaleY di sempre — un filo meno "verticale e basta",
+           più simile a un vero respiro con leggerissima torsione. */
+        @keyframes torsoBreathe { 0%,100%{ transform:scaleY(1) rotate(0deg); } 50%{ transform:scaleY(1.015) rotate(0.3deg); } }
+        @keyframes hipSway    { 0%,100%{ transform:rotate(0deg); } 50%{ transform:rotate(-0.6deg); } }
+        @keyframes tailSway   { 0%,100%{ transform:rotate(-4deg); } 50%{ transform:rotate(6deg); } }
+        @keyframes shadowBreathe { 0%,100%{ transform:scaleX(1); opacity:1; } 50%{ transform:scaleX(0.92); opacity:0.85; } }
+        @keyframes shadowBounce  { 0%{transform:scaleX(1);} 20%{transform:scaleX(1.12);} 45%{transform:scaleX(0.8);} 65%{transform:scaleX(1.05);} 100%{transform:scaleX(1);} }
+        @keyframes cheekPulse    { 0%,100%{ transform:scale(1); opacity:0.16; } 50%{ transform:scale(1.08); opacity:0.22; } }
+        /* Aura leggendaria — v2.2.2: bagliore un filo più morbido (opacità
+           massima ridotta), un secondo alone più ampio e lento per dare
+           profondità, invariato nel trigger (solo stage.aura, solo streak). */
+        @keyframes aura       { 0%,100%{ opacity:.4; transform:scale(1); }  50%{ opacity:.8; transform:scale(1.05); } }
+        @keyframes auraOuter  { 0%,100%{ opacity:.5; transform:scale(1); }  50%{ opacity:.9; transform:scale(1.03); } }
+        @keyframes auraSparkle{ 0%,15%,100%{ opacity:0; transform:translateY(0) scale(0.6); } 30%{ opacity:.9; } 55%{ opacity:.5; transform:translateY(-6px) scale(1); } 85%{ opacity:.8; } }
         @keyframes pfloat     { 0%{ transform:translateY(0); opacity:1; } 100%{ transform:translateY(-50px); opacity:0; } }
  
         /* Rispetta la preferenza di sistema per il movimento ridotto: le
            animazioni ambientali continue (idle/breathe/drowsy/excited/sad)
            si fermano, quelle di feedback (bounce/hop/stretch/lick) restano
-           ma molto più brevi, per non perdere il riscontro dell'interazione. */
+           ma molto più brevi, per non perdere il riscontro dell'interazione.
+           v2.2.2: estesa alle nuove animazioni ambientali continue (fianchi,
+           coda, ombra, guance, aura) — stessa filosofia di sempre. */
         @media (prefers-reduced-motion: reduce) {
           .fox-idle, .fox-breathe, .fox-drowsy, .fox-sad, .fox-excited,
-          .fox-torso-group { animation: none !important; }
-          .fox-bounce, .fox-bounce2, .fox-hop, .fox-stretch, .fox-tongue { animation-duration: 0.15s !important; }
-          .fox-head-group { transition-duration: 0.15s !important; }
+          .fox-torso-group, .fox-hip-group, .fox-tail-group, .fox-shadow,
+          .fox-cheek-pulse { animation: none !important; }
+          .fox-bounce, .fox-bounce2, .fox-hop, .fox-stretch, .fox-tongue, .fox-shadow-bounce { animation-duration: 0.15s !important; }
+          .fox-head-group, .fox-ear { transition-duration: 0.15s !important; }
         }
       `}</style>
     </div>
