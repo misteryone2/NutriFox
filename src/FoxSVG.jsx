@@ -5,10 +5,23 @@
  
 export default function FoxSVG({
   ex, colors, streak, legendary, blink, lookOffset, headTilt, earAngle, tailSpeed = "3.5s",
-  yawning = false, licking = false,
+  yawning = false, licking = false, bodyAnim = "fox-idle",
 }) {
   const { sw, swD, pt } = colors;
   const eyesClosed = ex.open === false || blink || yawning;
+
+  // v2.2.2 — restyling grafico: la scala della pupilla varia leggermente in
+  // base all'apertura dell'occhio già codificata nel mood (ex.eH, esistente
+  // da sempre) — occhi più spalancati (excited/happy) → pupille un filo più
+  // dilatate; occhi socchiusi (sad/drowsy) → un filo più contratte. Nessun
+  // nuovo dato dal Fox Engine: solo un'interpretazione visiva di ex.eH.
+  const pupilScale = ex.eH >= 1.05 ? 1.08 : ex.eH <= 0.72 ? 0.92 : 1;
+
+  // La reazione dell'ombra a terra segue lo stesso bodyAnim già calcolato da
+  // Fox.jsx per il corpo — quando la volpe salta/rimbalza, l'ombra si
+  // stringe e si allarga in coerenza, invece di restare sempre identica.
+  const shadowBounceClass = (bodyAnim === "fox-bounce" || bodyAnim === "fox-bounce2" || bodyAnim === "fox-hop")
+    ? "fox-shadow-bounce" : "";
  
   return (
     <svg width="100%" height="100%" viewBox="0 0 104 123" aria-hidden="true"
@@ -57,10 +70,17 @@ export default function FoxSVG({
         )}
       </defs>
  
-      {/* OMBRA A TERRA */}
-      <ellipse cx="50" cy="121" rx="28" ry="4" fill="#00000020"/>
+      {/* OMBRA A TERRA — v2.2.2: pulsa leggermente col respiro, si stringe/
+          allarga in coerenza con salti e rimbalzi (bodyAnim, da Fox.jsx). */}
+      <ellipse className={`fox-shadow ${shadowBounceClass}`} cx="50" cy="121" rx="28" ry="4" fill="#00000020"
+        style={{ transformOrigin:"50px 121px" }}/>
  
-      {/* CODA — inerzia elastica via CSS, vedi style esterno */}
+      {/* CODA — v2.2.2: .fox-tail-group ora ha una vera oscillazione propria
+          (keyframe tailSway in Fox.jsx, mancante prima — la coda si muoveva
+          solo per trascinamento dei gruppi genitori). Il commento "inerzia
+          elastica via CSS" era già corretto nell'intento, ora lo è anche nel
+          codice: transizione con leggero overshoot, stessa filosofia delle
+          orecchie. */}
       <g className="fox-tail-group" style={{ transformOrigin:"72px 110px", animationDuration: tailSpeed }}>
         <path d="M 72 113 Q 102 92 99 58 Q 96 35 78 45 Q 91 62 83 89 Q 79 104 72 111 Z"
           fill="#00000016" transform="translate(2,4)" filter="url(#blur)"/>
@@ -72,13 +92,17 @@ export default function FoxSVG({
         <ellipse cx="88" cy="41" rx="6.5" ry="5" fill="white" opacity="0.5" transform="rotate(-35 88 41)"/>
       </g>
  
-      {/* GAMBE */}
-      <rect x="33" y="110" width="15" height="13" rx="7" fill={pt}/>
-      <rect x="56" y="110" width="15" height="13" rx="7" fill={pt}/>
-      <ellipse cx="40" cy="121" rx="10.5" ry="5.5" fill="#2A0E04"/>
-      <ellipse cx="63" cy="121" rx="10.5" ry="5.5" fill="#2A0E04"/>
-      {[34,40,46].map(x=><ellipse key={"l"+x} cx={x} cy={x===40?123:121} rx="3.4" ry="3" fill="#3A1A08"/>)}
-      {[57,63,69].map(x=><ellipse key={"r"+x} cx={x} cy={x===63?123:121} rx="3.4" ry="3" fill="#3A1A08"/>)}
+      {/* GAMBE — v2.2.2: avvolte in un gruppo "fianchi" con una oscillazione
+          propria, sfasata rispetto al respiro del busto, per un movimento
+          generale meno sincrono/meccanico. */}
+      <g className="fox-hip-group" style={{ transformOrigin:"50px 116px" }}>
+        <rect x="33" y="110" width="15" height="13" rx="7" fill={pt}/>
+        <rect x="56" y="110" width="15" height="13" rx="7" fill={pt}/>
+        <ellipse cx="40" cy="121" rx="10.5" ry="5.5" fill="#2A0E04"/>
+        <ellipse cx="63" cy="121" rx="10.5" ry="5.5" fill="#2A0E04"/>
+        {[34,40,46].map(x=><ellipse key={"l"+x} cx={x} cy={x===40?123:121} rx="3.4" ry="3" fill="#3A1A08"/>)}
+        {[57,63,69].map(x=><ellipse key={"r"+x} cx={x} cy={x===63?123:121} rx="3.4" ry="3" fill="#3A1A08"/>)}
+      </g>
  
       {/* CORPO / MAGLIONE — leggero movimento respiro via CSS class esterna */}
       <g className="fox-torso-group" style={{ transformOrigin:"50px 100px" }}>
@@ -114,14 +138,18 @@ export default function FoxSVG({
         <ellipse cx="32" cy="22" rx="16" ry="10" fill="#FFC68C" opacity="0.32" transform="rotate(-18 32 22)"/>
         <ellipse cx="28" cy="18" rx="7"  ry="4"  fill="#FFE0BC" opacity="0.3"  transform="rotate(-18 28 18)"/>
  
-        {/* ORECCHIE — angolo dinamico in base al mood */}
-        <g style={{ transformOrigin:"24px 22px", transform:`rotate(${earAngle.left}deg)` }}>
+        {/* ORECCHIE — angolo dinamico in base al mood. v2.2.2: className
+            fox-ear aggiunge una transition con leggero "overshoot" (vedi
+            Fox.jsx) — lo stesso angolo calcolato da FoxBrain ora arriva a
+            destinazione con un piccolo rimbalzo fisico invece di scattare
+            di colpo. Nessun nuovo dato, solo un'interpolazione più morbida. */}
+        <g className="fox-ear" style={{ transformOrigin:"24px 22px", transform:`rotate(${earAngle.left}deg)` }}>
           <polygon points="24,26 14,0 44,16" fill="url(#fur)"/>
           <polygon points="26,25 19,4  42,17" fill="#9C4610" opacity="0.28"/>
           <polygon points="27,24 22,7  40,18" fill="#C04818" opacity="0.34"/>
           <polygon points="29,23 24,9  38,19" fill="#FECFB8" opacity="0.55"/>
         </g>
-        <g style={{ transformOrigin:"74px 22px", transform:`rotate(${earAngle.right}deg)` }}>
+        <g className="fox-ear" style={{ transformOrigin:"74px 22px", transform:`rotate(${earAngle.right}deg)`, transitionDelay:"0.03s" }}>
           <polygon points="74,26 90,0 60,16" fill="url(#fur)"/>
           <polygon points="72,25 79,4  62,17" fill="#9C4610" opacity="0.28"/>
           <polygon points="71,24 76,7  64,18" fill="#C04818" opacity="0.34"/>
@@ -133,26 +161,30 @@ export default function FoxSVG({
         <ellipse cx="49" cy="57" rx="18" ry="12" fill="#FAF4EC"/>
         <ellipse cx="44" cy="53" rx="7" ry="4" fill="white" opacity="0.3"/>
  
-        {/* OCCHI */}
+        {/* OCCHI — v2.2.2: transizione morbida su cx/cy (lo sguardo si sposta
+            invece di scattare) e pupille leggermente piu dilatate/contratte
+            in base a ex.eH, gia esistente. */}
         {!eyesClosed ? (
           <g>
             {/* SX */}
             <ellipse cx={34+lookOffset.x} cy={42+ex.bY*0.4+lookOffset.y} rx="9" ry={9*ex.eH}
-              fill="white" style={{ filter:"drop-shadow(0 2px 6px #00000026)" }}/>
-            <circle cx={34+lookOffset.x*1.4} cy={43+ex.bY*0.4+lookOffset.y*1.2} r="6.6" fill="url(#iris)"/>
-            <circle cx={34+lookOffset.x*1.4} cy={43+ex.bY*0.4+lookOffset.y*1.2} r="4.3" fill="#100300"/>
+              fill="white" style={{ filter:"drop-shadow(0 2px 6px #00000026)", transition:"cx 0.4s ease-out, cy 0.4s ease-out" }}/>
+            <circle cx={34+lookOffset.x*1.4} cy={43+ex.bY*0.4+lookOffset.y*1.2} r={6.6*pupilScale} fill="url(#iris)" style={{ transition:"cx 0.4s ease-out, cy 0.4s ease-out" }}/>
+            <circle cx={34+lookOffset.x*1.4} cy={43+ex.bY*0.4+lookOffset.y*1.2} r={4.3*pupilScale} fill="#100300" style={{ transition:"cx 0.4s ease-out, cy 0.4s ease-out" }}/>
             <circle cx={36.2+lookOffset.x*1.4} cy={39.8+ex.bY*0.4+lookOffset.y*1.2} r="2.3" fill="white" opacity="0.95" filter="url(#eg)"/>
             <circle cx={32.4+lookOffset.x*1.4} cy={46+ex.bY*0.4+lookOffset.y*1.2} r="1.1" fill="white" opacity="0.5"/>
             <circle cx={35+lookOffset.x*1.4} cy={45+ex.bY*0.4+lookOffset.y*1.2} r="0.7" fill="white" opacity="0.35"/>
- 
+            <circle cx={33+lookOffset.x*1.4} cy={41.2+ex.bY*0.4+lookOffset.y*1.2} r="0.9" fill="#FFE8D0" opacity="0.4"/>
+
             {/* DX */}
             <ellipse cx={64+lookOffset.x} cy={42+ex.bY*0.4+lookOffset.y} rx="9" ry={9*ex.eH}
-              fill="white" style={{ filter:"drop-shadow(0 2px 6px #00000026)" }}/>
-            <circle cx={64+lookOffset.x*1.4} cy={43+ex.bY*0.4+lookOffset.y*1.2} r="6.6" fill="url(#iris)"/>
-            <circle cx={64+lookOffset.x*1.4} cy={43+ex.bY*0.4+lookOffset.y*1.2} r="4.3" fill="#100300"/>
+              fill="white" style={{ filter:"drop-shadow(0 2px 6px #00000026)", transition:"cx 0.4s ease-out, cy 0.4s ease-out" }}/>
+            <circle cx={64+lookOffset.x*1.4} cy={43+ex.bY*0.4+lookOffset.y*1.2} r={6.6*pupilScale} fill="url(#iris)" style={{ transition:"cx 0.4s ease-out, cy 0.4s ease-out" }}/>
+            <circle cx={64+lookOffset.x*1.4} cy={43+ex.bY*0.4+lookOffset.y*1.2} r={4.3*pupilScale} fill="#100300" style={{ transition:"cx 0.4s ease-out, cy 0.4s ease-out" }}/>
             <circle cx={66.2+lookOffset.x*1.4} cy={39.8+ex.bY*0.4+lookOffset.y*1.2} r="2.3" fill="white" opacity="0.95" filter="url(#eg)"/>
             <circle cx={62.4+lookOffset.x*1.4} cy={46+ex.bY*0.4+lookOffset.y*1.2} r="1.1" fill="white" opacity="0.5"/>
             <circle cx={65+lookOffset.x*1.4} cy={45+ex.bY*0.4+lookOffset.y*1.2} r="0.7" fill="white" opacity="0.35"/>
+            <circle cx={63+lookOffset.x*1.4} cy={41.2+ex.bY*0.4+lookOffset.y*1.2} r="0.9" fill="#FFE8D0" opacity="0.4"/>
  
             {legendary && (
               <>
@@ -215,11 +247,13 @@ export default function FoxSVG({
           <ellipse className="fox-tongue" cx="49" cy="68" rx="4.5" ry="3" fill="#FF8FA3" opacity="0.9"/>
         )}
  
-        {/* GUANCE SOLLEVATE (happy/excited) */}
+        {/* GUANCE SOLLEVATE (happy/excited) — v2.2.2: una pulsazione molto
+            leggera (fox-cheek-pulse, keyframe in Fox.jsx) dà l'impressione
+            di un sorriso che "respira" invece di un'ellisse statica. */}
         {ex.cheeksUp && (
           <>
-            <ellipse cx="20" cy="58" rx="9" ry="5.5" fill="#F4845F" opacity="0.16"/>
-            <ellipse cx="78" cy="58" rx="9" ry="5.5" fill="#F4845F" opacity="0.16"/>
+            <ellipse className="fox-cheek-pulse" cx="20" cy="58" rx="9" ry="5.5" fill="#F4845F" opacity="0.16" style={{ transformOrigin:"20px 58px" }}/>
+            <ellipse className="fox-cheek-pulse" cx="78" cy="58" rx="9" ry="5.5" fill="#F4845F" opacity="0.16" style={{ transformOrigin:"78px 58px", animationDelay:"0.15s" }}/>
           </>
         )}
  
